@@ -18,8 +18,9 @@ DEFAULT_SEEDS = {
            "histoire oubliée", "faits étranges"],
 }
 
-# Примерная стоимость анализа одной ниши: по поиску (100) на каждую длительность + videos и channels
-UNITS_PER_NICHE = 100 * max(len(config.SEARCH_DURATIONS), 1) + 4
+# Примерная стоимость анализа одной ниши: по поиску (100) на каждую длительность, videos и channels
+# и последние ролики малых каналов (по единице на канал)
+UNITS_PER_NICHE = 100 * max(len(config.SEARCH_DURATIONS), 1) + 4 + config.UPLOADS_CHECK_CHANNELS
 
 _lock = threading.Lock()
 
@@ -47,7 +48,12 @@ def analyze_niche(client, query, lang):
     videos = client.videos(video_ids)
     channel_ids = [v["snippet"]["channelId"] for v in videos]
     channels = client.channels(channel_ids)
-    return analyze(query, lang, videos, channels)
+    # Реальная частота загрузок и дата первого ролика: только у малых каналов, они и есть ориентир
+    small = [c for c in channels if not c["statistics"].get("hiddenSubscriberCount")
+             and int(c["statistics"].get("subscriberCount", 0)) <= config.SMALL_CHANNEL_MAX_SUBS]
+    small.sort(key=lambda c: int(c["statistics"].get("subscriberCount", 0)))
+    uploads = {c["id"]: client.recent_uploads(c["id"]) for c in small[:config.UPLOADS_CHECK_CHANNELS]}
+    return analyze(query, lang, videos, channels, uploads=uploads)
 
 
 def plan_queries(client, queries, langs, expand, max_niches):

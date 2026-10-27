@@ -1,5 +1,5 @@
 {
- "version": 2,
- "notes": "значок программы в Dock",
+ "version": 3,
+ "notes": "точнее анализ: свежие ролики, реальная частота загрузок, новые каналы по первому ролику, пороги по рынкам",
  "app_zip": "https://raw.githubusercontent.com/Omajati/youtube-niche-finder/main/release/NicheFinder.zip"
 }

@@ -56,8 +56,25 @@ def _video_lang_ok(snippet, lang, channel_title=""):
     return not _non_latin(text) and not FOREIGN_WORDS.search(text)
 
 
-def analyze(query, lang, videos_raw, channels_raw, now=None):
+def _activity(dates, now, created_days):
+    """По датам последних длинных роликов: частота в неделю за 90 дней и сколько дней назад вышел первый ролик.
+
+    first_upload_days = None, если роликов 50 (больше не знаем) — тогда канал точно не новичок.
+    """
+    parsed = sorted(_parse_dt(d) for d in dates)
+    if not parsed:
+        return 0.0, None, 0
+    window = min(90, max(created_days, 7))
+    recent = [d for d in parsed if (now - d).days <= 90]
+    per_week = len(recent) / (window / 7)
+    first = (now - parsed[0]).days if len(parsed) < 50 else None
+    return per_week, first, len(recent)
+
+
+def analyze(query, lang, videos_raw, channels_raw, now=None, uploads=None):
     now = now or datetime.now(timezone.utc)
+    uploads = uploads or {}
+    min_views = config.MIN_VIEWS.get(lang, config.MIN_VIEWS["en"])
     channels = {}
     for c in channels_raw:
         st = c.get("statistics", {})
@@ -73,7 +90,17 @@ def analyze(query, lang, videos_raw, channels_raw, now=None):
             "created": created.date().isoformat(),
             "age_days": age_days,
             "uploads_per_week": round(video_count / (age_days / 7), 2),
+            "uploads_exact": False,
+            # «Возраст» канала по первому ролику: старый пустой аккаунт, начавший выкладывать недавно, тоже новичок
+            "active_days": age_days,
         }
+        dates = uploads.get(c["id"])
+        if dates is not None:
+            per_week, first_days, recent = _activity(dates, now, age_days)
+            ch = channels[c["id"]]
+            ch.update(uploads_per_week=round(per_week, 2), uploads_exact=True, long_uploads_90d=recent)
+            if first_days is not None:
+                ch["active_days"] = min(first_days, age_days)
 
     videos = []
     skipped_short = skipped_lang = 0
@@ -90,6 +117,7 @@ def analyze(query, lang, videos_raw, channels_raw, now=None):
         if not ch or ch["subs"] is None:
             continue
         views = int(v.get("statistics", {}).get("viewCount", 0))
+        age = max((now - _parse_dt(sn["publishedAt"])).days, 0)
         videos.append({
             "id": v["id"],
             "title": sn["title"],
@@ -99,6 +127,8 @@ def analyze(query, lang, videos_raw, channels_raw, now=None):
             "views": views,
             "duration_min": round(duration / 60, 1),
             "published": sn["publishedAt"][:10],
+            "age_days": age,
+            "views_per_day": round(views / max(age, 1)),
             "ratio": round(views / max(ch["subs"], 100), 2),
             "tags": sn.get("tags", []),
         })
@@ -122,23 +152,26 @@ def analyze(query, lang, videos_raw, channels_raw, now=None):
     small = [v for v in videos if v["subs"] <= config.SMALL_CHANNEL_MAX_SUBS]
     big_channels = [c for c in used_channels if c["subs"] >= config.BIG_CHANNEL_SUBS]
 
-    # Ролики малых каналов, набравшие от MIN_VIEWS просмотров. Всё, что ниже, успехом не считаем:
+    # Ролики малых каналов, набравшие от min_views просмотров (порог зависит от рынка). Всё, что ниже, успехом не считаем:
     # 3K просмотров на канале со 100 подписчиками даёт 30×, но спроса не доказывает.
-    hits = [v for v in small if v["views"] >= config.MIN_VIEWS]
-    hit_share = len(hits) / len(small) if small else 0
+    # Свежий ролик, который ещё не добрал порог, просто не успел: провалом его не считаем и не учитываем.
+    # Свежий ролик, уже набравший порог, наоборот, сильный сигнал и идёт в зачёт.
+    mature = [v for v in small if v["age_days"] >= config.MIN_VIDEO_AGE_DAYS or v["views"] >= min_views]
+    hits = [v for v in mature if v["views"] >= min_views]
+    hit_share = len(hits) / len(mature) if mature else 0
 
     # 1. Аутлайер-фактор: медиана ratio у таких роликов (0.3 -> 0, 10 -> 1, логарифмическая шкала)
-    #    и какая доля роликов малых каналов вообще дотягивает до MIN_VIEWS (половина и больше -> 1)
+    #    и какая доля роликов малых каналов вообще дотягивает до min_views (половина и больше -> 1)
     median_ratio = median(v["ratio"] for v in hits) if hits else 0
     s_ratio = _clamp((math.log10(median_ratio) + 0.5) / 1.5) if median_ratio > 0 else 0
     s_outlier = 0.7 * s_ratio + 0.3 * _clamp(hit_share / 0.5)
 
-    # 2. Новые каналы: созданы за последние NEW_CHANNEL_DAYS дней
-    new_channels = [c for c in used_channels if c["age_days"] <= config.NEW_CHANNEL_DAYS]
+    # 2. Новые каналы: первый ролик (или создание канала) за последние NEW_CHANNEL_DAYS дней
+    new_channels = [c for c in used_channels if c["active_days"] <= config.NEW_CHANNEL_DAYS]
     best_views = Counter()
     for v in videos:
         best_views[v["channel_id"]] = max(best_views[v["channel_id"]], v["views"])
-    new_successful = [c for c in new_channels if best_views[c["id"]] >= config.NEW_CHANNEL_MIN_VIEWS]
+    new_successful = [c for c in new_channels if best_views[c["id"]] >= min_views]
     s_new = _clamp(len(new_successful) / 3) * 0.8 + _clamp(len(new_channels) / 5) * 0.2
 
     # 3. Конкуренция: доля каналов-миллионников; 40% и больше -> 0
@@ -179,12 +212,14 @@ def analyze(query, lang, videos_raw, channels_raw, now=None):
     result.update(
         score=round(total),
         scores={k: round(v * 100) for k, v in scores.items()},
-        low_data=len(videos) < 10 or len(small) < 5 or len(hits) < 3,
+        low_data=len(videos) < 10 or len(mature) < 5 or len(hits) < 3,
         metrics={
             "median_ratio_small": round(median_ratio, 2),
             "median_views": int(median(v["views"] for v in videos)),
             "median_views_small": int(median(v["views"] for v in small)) if small else 0,
             "hits_small": len(hits),
+            "min_views": min_views,
+            "too_young": len(small) - len(mature),
             "hit_share_small": round(hit_share * 100),
             "channels": len(used_channels),
             "small_channels": len({v["channel_id"] for v in small}),
@@ -197,10 +232,11 @@ def analyze(query, lang, videos_raw, channels_raw, now=None):
             "uploads_per_week_successful": round(uploads_week, 2),
             "top_video_share": round(top_share * 100),
         },
-        top_videos=[{k: v[k] for k in ("id", "title", "channel", "subs", "views", "ratio", "duration_min", "published")}
+        top_videos=[{k: v[k] for k in ("id", "title", "channel", "subs", "views", "ratio", "duration_min", "published",
+                                          "views_per_day")}
                     for v in sorted(hits, key=lambda x: x["ratio"], reverse=True)[:8]],
         channels=sorted(
-            [{**c, "best_views": best_views[c["id"]], "is_new": c["age_days"] <= config.NEW_CHANNEL_DAYS}
+            [{**c, "best_views": best_views[c["id"]], "is_new": c["active_days"] <= config.NEW_CHANNEL_DAYS}
              for c in used_channels],
             key=lambda c: c["best_views"] / max(c["subs"], 100), reverse=True)[:12],
         related=[t for t, _ in tag_counter.most_common(12)],

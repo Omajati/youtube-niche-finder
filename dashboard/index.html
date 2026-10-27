@@ -169,7 +169,7 @@ a { color: var(--accent); }
           <th data-sort="lang">Язык</th>
           <th title="Аутлайер · Новые · Конкуренция · Стабильность · Формат">Критерии</th>
           <th data-sort="m.median_ratio_small" title="Медиана просмотры/подписчики у малых каналов">Просм./подп.</th>
-          <th data-sort="m.hits_small" title="Ролики малых каналов от 10K просмотров">Ролики 10K+</th>
+          <th data-sort="m.hits_small" title="Ролики малых каналов, набравшие порог просмотров (EN 10K, остальные 5K)">Ролики с порогом</th>
           <th data-sort="m.new_successful" title="Новые каналы (≤3 мес.) с хорошими просмотрами / всего новых">Новые</th>
           <th data-sort="m.big_share">Миллионники</th>
           <th data-sort="m.avg_length_successful_min">Длина</th>
@@ -300,6 +300,7 @@ function render() {
 
 function detail(r) {
   const m = r.metrics || {};
+  const mv = fmt(m.min_views || 10000);
   const metric = (v, l) => `<div class="metric"><b>${v}</b><span>${l}</span></div>`;
   const crit = CRIT.map(([k, n, w]) => `<div class="crit"><span>${n} <span style="color:var(--muted)">${w}%</span></span>
     <div class="track"><div class="fill" style="width:${r.scores[k]}%;background:${color(r.scores[k])}"></div></div><b>${r.scores[k]}</b></div>`).join("");
@@ -307,16 +308,16 @@ function detail(r) {
     <img loading="lazy" src="https://i.ytimg.com/vi/${esc(v.id)}/mqdefault.jpg" alt="">
     <div><div class="t">${esc(v.title)}</div>
     <div class="m">${esc(v.channel)} · ${fmt(v.subs)} подп.</div>
-    <div class="m">${fmt(v.views)} просм. · <span class="ratio">${v.ratio}×</span> · ${v.duration_min} мин · ${v.published}</div></div></a>`).join("");
+    <div class="m">${fmt(v.views)} просм.${v.views_per_day ? ` (${fmt(v.views_per_day)}/день)` : ""} · <span class="ratio">${v.ratio}×</span> · ${v.duration_min} мин · ${v.published}</div></div></a>`).join("");
   const channels = (r.channels || []).map(c => `<tr>
     <td><a href="https://www.youtube.com/channel/${esc(c.id)}" target="_blank" rel="noopener">${esc(c.title)}</a>${c.is_new ? ' <span class="new">новый</span>' : ""}</td>
-    <td>${fmt(c.subs)}</td><td>${fmt(c.best_views)}</td><td>${c.video_count}</td><td>${c.uploads_per_week}</td><td>${c.created}</td></tr>`).join("");
+    <td>${fmt(c.subs)}</td><td>${fmt(c.best_views)}</td><td>${c.video_count}</td><td>${c.uploads_per_week}${c.uploads_exact ? "" : "≈"}</td><td>${c.created}</td></tr>`).join("");
   const related = (r.related || []).map(t => `<button class="chip" data-tag="${esc(t)}">${esc(t)}</button>`).join("");
   return `<tr class="detail"><td colspan="9">
     <div class="dgrid">
-      ${metric(m.median_ratio_small + "×", "медиана просм./подп. у роликов от 10K")}
-      ${metric(`${m.hits_small ?? 0} (${m.hit_share_small ?? 0}%)`, "роликов малых каналов от 10K просм.")}
-      ${metric(`${m.new_successful} из ${m.new_channels}`, "новых каналов с ≥10K просм.")}
+      ${metric(m.median_ratio_small + "×", `медиана просм./подп. у роликов от ${mv}`)}
+      ${metric(`${m.hits_small ?? 0} (${m.hit_share_small ?? 0}%)`, `роликов малых каналов от ${mv} просм.`)}
+      ${metric(`${m.new_successful} из ${m.new_channels}`, `новых каналов с ≥${mv} просм.`)}
       ${metric(`${m.big_channels} из ${m.channels}`, "каналов-миллионников")}
       ${metric(m.avg_length_successful_min + " мин", "средняя длина успешных роликов")}
       ${metric(m.uploads_per_week_successful + " в нед.", "частота загрузок успешных каналов")}
@@ -324,8 +325,8 @@ function detail(r) {
       ${metric(`${r.videos_long} из ${r.videos_found}`, "роликов от 8 мин в выдаче")}
     </div>
     ${crit}
-    <h3>Лучшие ролики малых каналов (от 10K просмотров)</h3><div class="videos">${videos || '<span class="hint">нет роликов от 10K</span>'}</div>
-    <h3>Каналы</h3><div class="table-wrap"><table class="ch-table"><thead><tr><th>Канал</th><th>Подписчики</th><th>Лучший ролик</th><th>Видео</th><th>В неделю</th><th>Создан</th></tr></thead><tbody>${channels}</tbody></table></div>
+    <h3>Лучшие ролики малых каналов (от ${mv} просмотров)</h3><div class="videos">${videos || `<span class="hint">нет роликов от ${mv}</span>`}</div>
+    <h3>Каналы</h3><div class="table-wrap"><table class="ch-table"><thead><tr><th>Канал</th><th>Подписчики</th><th>Лучший ролик</th><th>Видео</th><th title="Длинные ролики в неделю за последние 3 месяца">В неделю</th><th>Создан</th></tr></thead><tbody>${channels}</tbody></table></div>
     <h3>Похожие подниши (теги успешных роликов, нажмите чтобы добавить)</h3><div class="chips">${related || '<span class="hint">нет тегов</span>'}</div>
     <div class="actions"><button class="ghost" data-del="${esc(key(r))}">Удалить из списка</button>
       <span class="hint">Проанализировано ${r.analyzed_at.slice(0, 16).replace("T", " ")}</span></div>

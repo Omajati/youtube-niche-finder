@@ -15,7 +15,7 @@ def main():
     p.add_argument("queries", nargs="*", help="темы для анализа (на языке рынка); пусто = стартовые темы")
     p.add_argument("--langs", default="en", help="языки через запятую: en,es,de,fr")
     p.add_argument("--expand", type=int, default=0, help="сколько подсказок YouTube добавить к каждой теме")
-    p.add_argument("--max", type=int, default=10, help="максимум ниш за запуск (≈204 единицы квоты на нишу)")
+    p.add_argument("--max", type=int, default=10, help="максимум ниш за запуск (≈244 единицы квоты на нишу)")
     args = p.parse_args()
 
     def progress(s):

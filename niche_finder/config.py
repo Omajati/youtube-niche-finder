@@ -56,9 +56,16 @@ LANGUAGES = {"en": "English", "es": "Español", "de": "Deutsch", "fr": "Françai
 MIN_DURATION_SEC = _int("MIN_DURATION_MIN", 8) * 60   # длинные ролики от 8 минут
 SMALL_CHANNEL_MAX_SUBS = _int("SMALL_CHANNEL_MAX_SUBS", 200_000)
 BIG_CHANNEL_SUBS = _int("BIG_CHANNEL_SUBS", 1_000_000)
-NEW_CHANNEL_DAYS = _int("NEW_CHANNEL_DAYS", 90)       # «новый канал» = создан за 3 месяца
-MIN_VIEWS = _int("MIN_VIEWS", 10_000)                # ролик с меньшим числом просмотров успехом не считается
-NEW_CHANNEL_MIN_VIEWS = _int("NEW_CHANNEL_MIN_VIEWS", MIN_VIEWS)
+NEW_CHANNEL_DAYS = _int("NEW_CHANNEL_DAYS", 90)       # «новый канал» = первый ролик за последние 3 месяца
+# Ролик с меньшим числом просмотров успехом не считается. Рынки ES/DE/FR меньше английского, порог ниже.
+MIN_VIEWS = {
+    "en": _int("MIN_VIEWS_EN", _int("MIN_VIEWS", 10_000)),
+    "es": _int("MIN_VIEWS_ES", _int("MIN_VIEWS", 5_000)),
+    "de": _int("MIN_VIEWS_DE", _int("MIN_VIEWS", 5_000)),
+    "fr": _int("MIN_VIEWS_FR", _int("MIN_VIEWS", 5_000)),
+}
+MIN_VIDEO_AGE_DAYS = _int("MIN_VIDEO_AGE_DAYS", 14)  # свежие ролики без порога ещё не успели, их не оцениваем
+UPLOADS_CHECK_CHANNELS = _int("UPLOADS_CHECK_CHANNELS", 40)  # у скольких малых каналов смотреть последние ролики
 SEARCH_PUBLISHED_DAYS = _int("SEARCH_PUBLISHED_DAYS", 180)  # ищем видео за последние N дней
 # Отдельный поиск на каждую длительность: medium = 4–20 мин, long = больше 20 мин.
 # Без фильтра выдача забита шортсами, а каждый поиск стоит 100 единиц квоты.
@@ -69,11 +76,12 @@ CACHE_TTL_HOURS = {
     "search": _int("CACHE_TTL_SEARCH_H", 72),
     "videos": _int("CACHE_TTL_VIDEOS_H", 24),
     "channels": _int("CACHE_TTL_CHANNELS_H", 72),
+    "playlistItems": _int("CACHE_TTL_UPLOADS_H", 72),
     "suggest": _int("CACHE_TTL_SUGGEST_H", 168),
 }
 
 # Стоимость запросов в единицах квоты (лимит 10 000 в день на ключ)
-UNIT_COST = {"search": 100, "videos": 1, "channels": 1}
+UNIT_COST = {"search": 100, "videos": 1, "channels": 1, "playlistItems": 1}
 DAILY_QUOTA_PER_KEY = 10_000
 
 PORT = _int("PORT", 8766)

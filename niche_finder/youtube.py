@@ -38,6 +38,10 @@ class NoApiKeys(Exception):
     pass
 
 
+class NotFound(Exception):
+    pass
+
+
 def _quota_day():
     # Квота YouTube сбрасывается в полночь по тихоокеанскому времени.
     # Берём UTC-8 круглый год: летом это на час позже реального сброса, зато никогда не раньше.
@@ -145,6 +149,8 @@ class YouTubeClient:
     def _call(self, endpoint, params):
         cached = self.cache.get(endpoint, params)
         if cached is not None:
+            if cached.get("not_found"):
+                raise NotFound("cached")
             return cached
         if not self.keys:
             raise NoApiKeys("Не задан YOUTUBE_API_KEYS в файле .env")
@@ -163,6 +169,11 @@ class YouTubeClient:
                     self.quota.mark(key, "exhausted")
                 elif reason in ("keyInvalid", "accessNotConfigured", "keyExpired", "forbidden"):
                     self.quota.mark(key, "invalid")
+                elif err.code == 404:
+                    self.quota.add_usage(key, config.UNIT_COST[endpoint])
+                    self.units_this_run += config.UNIT_COST[endpoint]
+                    self.cache.set(endpoint, params, {"not_found": True})
+                    raise NotFound(reason)
                 else:
                     raise
                 self.current = (self.current + 1) % len(self.keys)
@@ -206,6 +217,22 @@ class YouTubeClient:
             data = self._call("channels", {"part": "snippet,statistics", "id": ",".join(chunk)})
             out.extend(data.get("items", []))
         return out
+
+    def recent_uploads(self, channel_id):
+        """Даты последних (до 50) длинных роликов канала, новые первыми. None, если узнать не удалось.
+
+        Плейлист UULF… содержит загрузки без шортсов (неофициально, но работает у всех каналов),
+        UU… содержит все загрузки и нужен как запасной вариант.
+        """
+        for prefix in ("UULF", "UU"):
+            try:
+                data = self._call("playlistItems", {"part": "contentDetails", "maxResults": 50,
+                                                    "playlistId": prefix + channel_id[2:]})
+            except NotFound:
+                continue
+            return [i["contentDetails"].get("videoPublishedAt") for i in data.get("items", [])
+                    if i.get("contentDetails", {}).get("videoPublishedAt")]
+        return None
 
     def suggest(self, query, lang):
         """Подсказки поиска YouTube. Бесплатно, квоту не тратит."""

@@ -75,6 +75,33 @@ class ScoringTest(unittest.TestCase):
         self.assertEqual(r["top_videos"], [])
         self.assertTrue(r["low_data"])
 
+    def test_fresh_videos_and_market_threshold(self):
+        chs = [channel(f"c{i}", 2_000, 500) for i in range(6)]
+        fresh_hit = video("fh", "c0", 20_000)
+        fresh_hit["snippet"]["publishedAt"] = "2026-09-28T00:00:00Z"
+        fresh_low = video("fl", "c1", 900)
+        fresh_low["snippet"]["publishedAt"] = "2026-09-28T00:00:00Z"
+        old = [video(f"o{i}", f"c{i}", 6_000) for i in range(2, 6)]
+        en = analyze("q", "en", [fresh_hit, fresh_low] + old, chs, now=NOW)
+        de = analyze("q", "de", [fresh_hit, fresh_low] + old, chs, now=NOW)
+        self.assertEqual(en["metrics"]["too_young"], 1)          # свежий без порога не учитывается
+        self.assertEqual(en["metrics"]["hits_small"], 1)         # свежий с порогом идёт в зачёт, 6K < 10K
+        self.assertEqual(de["metrics"]["hits_small"], 5)         # для DE порог 5K
+        self.assertTrue(en["low_data"])                         # один ролик с порогом: оценке верить нельзя
+
+    def test_new_channel_by_first_upload(self):
+        # аккаунт 2019 года, но первый длинный ролик вышел месяц назад
+        chs = [channel("old", 3_000, 2500, videos=8)]
+        vids = [video("v", "old", 50_000)]
+        uploads = {"old": ["2026-09-01T00:00:00Z", "2026-09-10T00:00:00Z", "2026-09-20T00:00:00Z"]}
+        r = analyze("q", "en", vids, chs, now=NOW, uploads=uploads)
+        self.assertEqual(r["metrics"]["new_successful"], 1)
+        ch = r["channels"][0]
+        self.assertTrue(ch["uploads_exact"])
+        self.assertEqual(ch["long_uploads_90d"], 3)
+        self.assertLess(ch["uploads_per_week"], 1)
+        self.assertEqual(analyze("q", "en", vids, chs, now=NOW)["metrics"]["new_successful"], 0)
+
     def test_empty(self):
         self.assertEqual(analyze("q", "en", [], [], now=NOW)["score"], 0)
 
@@ -98,6 +125,8 @@ class FakeClient(YouTubeClient):
             return json.dumps({"items": [{"id": {"videoId": "v1"}}, {"id": {"videoId": "v2"}}]}).encode()
         if "/videos?" in url:
             return json.dumps({"items": [video("v1", "c1", 50_000), video("v2", "c1", 20_000)]}).encode()
+        if "/playlistItems?" in url:
+            return json.dumps({"items": [{"contentDetails": {"videoPublishedAt": "2026-09-01T00:00:00Z"}}]}).encode()
         if "/channels?" in url:
             return json.dumps({"items": [channel("c1", 4_000, 60)]}).encode()
         raise AssertionError(url)
@@ -117,7 +146,7 @@ class PipelineTest(unittest.TestCase):
         status = pipeline.run(["q"], ["en"], expand=2, max_niches=3, client=client)
         self.assertEqual(status["state"], "finished")
         self.assertEqual(status["done"], 3)
-        self.assertEqual(status["units"], 3 * 200 + 2)  # 2 поиска на нишу (medium + long)  # одинаковые videos/channels берутся из кэша
+        self.assertEqual(status["units"], 3 * 200 + 3)  # 2 поиска на нишу (medium + long), повторы из кэша  # одинаковые videos/channels берутся из кэша
         self.assertEqual({r["query"] for r in pipeline.load_results()}, {"q", "q one", "q two"})
         self.assertTrue(client.quota.summary()["keys"][0]["exhausted"])
         self.assertEqual(sum("key=KEY_ONE" in u for u in client.calls), 1)  # после исчерпания ключ не трогаем
