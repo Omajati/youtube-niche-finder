@@ -31,7 +31,18 @@ button.small { padding: 5px 10px; font-size: 12px; }
 .upd-msg { color: var(--muted); font-size: 12px; }
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; padding: 16px; z-index: 10; }
 .modal.open { display: flex; }
-.modal .panel { width: 100%; max-width: 520px; }
+.modal .panel { width: 100%; max-width: 520px; max-height: calc(100vh - 32px); overflow: auto; }
+.modal .panel.wide { max-width: 820px; }
+.set-group { margin-top: 14px; }
+.set-group h3 { font-size: 14px; margin: 0 0 4px; }
+.set-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 4px 14px; }
+.set-grid label { font-weight: 500; margin: 8px 0 4px; }
+.set-grid input[type=text] { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font: inherit; box-sizing: border-box; }
+.set-grid .changed input, .set-grid .changed select { border-color: var(--accent); }
+.set-grid .hint { margin-top: 2px; }
+.filters { display: none; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 10px; margin: -4px 0 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; }
+.filters.open { display: grid; }
+.filters label { font-weight: 500; margin: 4px 0; font-size: 12px; }
 .modal ol { padding-left: 18px; margin: 8px 0; color: var(--muted); font-size: 13px; }
 h1 { font-size: 20px; margin: 0 0 4px; }
 .sub { color: var(--muted); font-size: 13px; }
@@ -126,7 +137,8 @@ a { color: var(--accent); }
   </div>
   <div class="top-actions">
     <button class="update" id="updateBtn" style="display:none">Обновить</button>
-    <button class="ghost" id="settingsBtn">Настройки</button>
+    <button class="ghost" id="anSettingsBtn">Настройки анализа</button>
+    <button class="ghost" id="settingsBtn">Ключи API</button>
     <button class="ghost" id="quitBtn">Выключить</button>
     <span class="ver" id="ver"></span>
   </div>
@@ -146,6 +158,22 @@ a { color: var(--accent); }
       <button id="keysSave">Сохранить</button>
       <button class="ghost" id="keysClose">Закрыть</button>
     </div>
+  </div>
+</div>
+<div class="modal" id="anSettings">
+  <div class="panel wide">
+    <h2>Настройки анализа</h2>
+    <div class="hint">Что считать успехом, какие каналы малые и новые, и насколько важен каждый критерий. Изменённые поля подсвечены.
+      После сохранения все найденные ниши пересчитаются по новым правилам. Это бесплатно: данные берутся из кэша
+      (поиск хранится 3 дня, после этого у ниши обновится только балл по новым весам).
+      Период и длины поиска меняют сам поиск, поэтому действуют на новые запуски и тратят квоту.</div>
+    <div id="anForm"></div>
+    <div class="actions">
+      <button id="anSave">Сохранить и пересчитать</button>
+      <button class="ghost" id="anReset">Вернуть по умолчанию</button>
+      <button class="ghost" id="anClose">Закрыть</button>
+    </div>
+    <div class="hint" id="anMsg"></div>
   </div>
 </div>
 <main>
@@ -203,7 +231,19 @@ a { color: var(--accent); }
       <label style="margin:0;font-weight:400;display:inline-flex;gap:6px;align-items:center">
         <input type="checkbox" id="hideLow"> скрыть «мало данных»
       </label>
+      <button class="ghost small" id="filtersBtn">Фильтры</button>
       <span class="count" id="count"></span>
+    </div>
+    <div class="filters" id="filters">
+      <div><label for="fScore">Балл от</label><input type="number" id="fScore" min="0" max="100" placeholder="любой"></div>
+      <div><label for="fRatio">Просм./подп. от, ×</label><input type="number" id="fRatio" min="0" step="0.5" placeholder="любой"></div>
+      <div><label for="fNew">Новых успешных каналов от</label><input type="number" id="fNew" min="0" placeholder="любое"></div>
+      <div><label for="fBig">Миллионников до, %</label><input type="number" id="fBig" min="0" max="100" placeholder="любое"></div>
+      <div><label for="fEver">Вечнозелёность от</label><input type="number" id="fEver" min="0" max="100" placeholder="любая"></div>
+      <div><label for="fTotal">Роликов по теме до</label><input type="number" id="fTotal" min="0" step="1000" placeholder="любое"></div>
+      <div><label for="fHits">Успешных роликов от</label><input type="number" id="fHits" min="0" placeholder="любое"></div>
+      <div><label for="fLen">Длина успешных от, мин</label><input type="number" id="fLen" min="0" placeholder="любая"></div>
+      <div><label>&nbsp;</label><button class="ghost small" id="fClear">Сбросить фильтры</button></div>
     </div>
     <div class="table-wrap">
       <table>
@@ -253,10 +293,14 @@ const fmt = n => n >= 1e6 ? (n / 1e6).toFixed(1).replace(".0", "") + "M" : n >= 
 const color = s => s >= 65 ? "var(--good)" : s >= 40 ? "var(--mid)" : "var(--bad)";
 const key = r => r.lang + "|" + r.query;
 
-async function loadConfig() {
-  cfg = await (await fetch("/api/config")).json();
+function renderCriteria() {
   const c = cfg.criteria;
   $("criteria").textContent = `Видео от ${c.min_duration_min} мин за последние ${c.search_published_days} дней · малые каналы до ${fmt(c.small_channel_max_subs)} подписчиков · миллионники от ${fmt(c.big_channel_subs)} считаются конкуренцией · «новый канал» младше ${c.new_channel_days} дней`;
+}
+
+async function loadConfig() {
+  cfg = await (await fetch("/api/config")).json();
+  renderCriteria();
   $("langs").innerHTML = Object.entries(cfg.languages).map(([code, name]) =>
     `<label><input type="checkbox" value="${code}" ${code === "en" ? "checked" : ""}> ${name}</label>`).join("");
   $("filterLang").innerHTML = `<option value="">Все языки</option>` +
@@ -402,7 +446,7 @@ async function poll() {
   clearTimeout(polling);
   const s = await (await fetch("/api/status")).json();
   if (s.state === "running") {
-    showStatus(`${s.mode === "auto" ? `Автопоиск, ${s.phase || ""}` : "Анализ"}: ${s.done}/${s.total || "?"}${s.current ? ` · сейчас <b>${esc(s.current)}</b>` : ""} · потрачено ${s.units || 0} ед.`);
+    showStatus(`${s.mode === "auto" ? `Автопоиск, ${s.phase || ""}` : s.mode === "recheck" ? "Пересчёт по новым настройкам" : "Анализ"}: ${s.done}/${s.total || "?"}${s.current ? ` · сейчас <b>${esc(s.current)}</b>` : ""} · потрачено ${s.units || 0} ед.`);
     await loadResults();
     polling = setTimeout(poll, 1500);
     return;
@@ -411,11 +455,14 @@ async function poll() {
   if (s.state === "idle") return;
   const errs = (s.errors || []).map(e => "<br>" + esc(e)).join("");
   const label = { finished: "Готово", quota_exhausted: "Квота закончилась на всех ключах", error: "Ошибка" }[s.state] || s.state;
-  showStatus(`${label}: проанализировано ${s.done || 0} ниш, потрачено ${s.units || 0} ед.${s.mode === "auto" ? `. В очереди на следующий запуск: ${s.queue ?? 0} подниш` : ""}${errs}`, s.state !== "finished");
+  if (s.mode === "recheck") showStatus(`Пересчитано ${s.done || 0} ниш по новым настройкам: ${s.from_cache || 0} полностью из кэша, ${s.weights_only || 0} только по новым весам (их данных в кэше уже нет). Квота не тратилась.${errs}`, s.state !== "finished");
+  else showStatus(`${label}: проанализировано ${s.done || 0} ниш, потрачено ${s.units || 0} ед.${s.mode === "auto" ? `. В очереди на следующий запуск: ${s.queue ?? 0} подниш` : ""}${errs}`, s.state !== "finished");
   await loadVault();
   await loadResults();
   const fresh = await (await fetch("/api/config")).json();
-  cfg.quota = fresh.quota; cfg.auto = fresh.auto;
+  Object.assign(cfg, { quota: fresh.quota, auto: fresh.auto, weights: fresh.weights, criteria: fresh.criteria,
+                      units_per_niche: fresh.units_per_niche });
+  renderCriteria();
   renderQuota(cfg.quota);
   updateAutoEstimate();
 }
@@ -431,12 +478,52 @@ function val(r, k) {
   return r[k];
 }
 const sc = (r, k) => (r.scores || {})[k] ?? 0;
+function weightPct(k) {
+  const w = (cfg && cfg.weights) || Object.fromEntries(CRIT.map(c => [c[0], c[2]]));
+  const sum = Object.values(w).reduce((a, b) => a + b, 0) || 1;
+  return Math.round((w[k] || 0) * 100 / sum);
+}
+
+// --- фильтры таблицы: найти «золотые» подниши по своим условиям ---
+const FILTERS = [
+  ["fScore", r => r.score, "min"],
+  ["fRatio", r => (r.metrics || {}).median_ratio_small, "min"],
+  ["fNew", r => (r.metrics || {}).new_successful, "min"],
+  ["fBig", r => (r.metrics || {}).big_share, "max"],
+  ["fEver", r => sc(r, "evergreen"), "min"],
+  ["fTotal", r => (r.metrics || {}).search_total, "max"],
+  ["fHits", r => (r.metrics || {}).hits_small, "min"],
+  ["fLen", r => (r.metrics || {}).avg_length_successful_min, "min"],
+];
+function passFilters(r) {
+  return FILTERS.every(([id, get, kind]) => {
+    const raw = $(id).value;
+    if (raw === "") return true;
+    const v = get(r), lim = Number(raw);
+    if (v == null) return kind === "max";   // нет данных о насыщенности: не отбрасываем
+    return kind === "min" ? v >= lim : v <= lim;
+  });
+}
+function activeFilters() { return FILTERS.filter(([id]) => $(id).value !== "").length; }
+function saveFilters() {
+  try { localStorage.setItem("nf.filters", JSON.stringify(Object.fromEntries(FILTERS.map(([id]) => [id, $(id).value])))); } catch (e) {}
+  const n = activeFilters();
+  $("filtersBtn").textContent = n ? `Фильтры (${n})` : "Фильтры";
+}
+function restoreFilters() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("nf.filters") || "{}");
+    FILTERS.forEach(([id]) => { if (saved[id] != null) $(id).value = saved[id]; });
+    if (activeFilters()) $("filters").classList.add("open");
+  } catch (e) {}
+  saveFilters();
+}
 
 function render() {
   const lang = $("filterLang").value, hideLow = $("hideLow").checked, depth = $("filterDepth").value;
   renderBest();
   const rows = results.filter(r => (!lang || r.lang === lang) && (!hideLow || !r.low_data)
-    && (!depth || (r.depth || "full") === depth))
+    && (!depth || (r.depth || "full") === depth) && passFilters(r))
     .sort((a, b) => { const x = val(a, sortKey), y = val(b, sortKey); return (x > y ? 1 : x < y ? -1 : 0) * sortDir; });
   $("empty").style.display = rows.length ? "none" : "block";
   $("count").textContent = results.length ? `${rows.length} из ${results.length}` : "";
@@ -464,7 +551,7 @@ function detail(r) {
   const m = r.metrics || {};
   const mv = fmt(m.min_views || 10000);
   const metric = (v, l) => `<div class="metric"><b>${v}</b><span>${l}</span></div>`;
-  const crit = CRIT.map(([k, n, w]) => `<div class="crit"><span>${n} <span style="color:var(--muted)">${w}%</span></span>
+  const crit = CRIT.map(([k, n]) => `<div class="crit"><span>${n} <span style="color:var(--muted)">${weightPct(k)}%</span></span>
     <div class="track"><div class="fill" style="width:${sc(r, k)}%;background:${color(sc(r, k))}"></div></div><b>${sc(r, k)}</b></div>`).join("");
   const inVault = vault.items.some(v => v.key === vkey(r));
   const videos = (r.top_videos || []).map(v => `<a class="video" href="https://www.youtube.com/watch?v=${esc(v.id)}" target="_blank" rel="noopener">
@@ -547,6 +634,9 @@ $("filterDepth").addEventListener("change", render);
 $("runAuto").addEventListener("click", runAuto);
 $("budget").addEventListener("input", updateAutoEstimate);
 $("hideLow").addEventListener("change", render);
+$("filtersBtn").addEventListener("click", () => $("filters").classList.toggle("open"));
+FILTERS.forEach(([id]) => $(id).addEventListener("input", () => { saveFilters(); render(); }));
+$("fClear").addEventListener("click", () => { FILTERS.forEach(([id]) => $(id).value = ""); saveFilters(); render(); });
 $("run").addEventListener("click", run);
 $("seeds").addEventListener("click", () => {
   const langs = selectedLangs();
@@ -556,6 +646,73 @@ $("seeds").addEventListener("click", () => {
 });
 ["queries", "expand", "max"].forEach(id => $(id).addEventListener("input", updateEstimate));
 $("langs").addEventListener("change", updateEstimate);
+
+// --- настройки анализа ---
+let anSpec = null;
+const fmtNum = v => typeof v === "number" ? v.toLocaleString("ru-RU") : v;
+async function openAnSettings() {
+  anSpec = await (await fetch("/api/settings")).json();
+  const groups = [];
+  anSpec.spec.forEach(f => { (groups.find(g => g[0] === f.group) || groups[groups.push([f.group, []]) - 1])[1].push(f); });
+  $("anForm").innerHTML = groups.map(([g, fields]) => `<div class="set-group"><h3>${esc(g)}</h3>
+    ${g === "Веса критериев" ? '<div class="hint">Важность критерия в итоговом балле. Сумма может быть любой, в процентах она пересчитается сама. 0 выключает критерий.</div>' : ""}
+    <div class="set-grid">${fields.map(field).join("")}</div></div>`).join("");
+  $("anForm").querySelectorAll("input, select").forEach(i => i.addEventListener("input", markChanged));
+  markChanged();
+  $("anMsg").textContent = "";
+  $("anSettings").classList.add("open");
+}
+function field(f) {
+  const v = anSpec.values[f.key], d = anSpec.defaults[f.key];
+  let input;
+  if (f.kind === "choice") {
+    input = `<select data-k="${f.key}">${Object.entries(anSpec.durations).map(([k, n]) => `<option value="${k}" ${k === v ? "selected" : ""}>${esc(n)}</option>`).join("")}</select>`;
+  } else if (f.kind === "text") {
+    input = `<input type="text" data-k="${f.key}" value="${esc(v)}">`;
+  } else {
+    input = `<input type="number" data-k="${f.key}" value="${v}" min="${f.min}" max="${f.max}" step="${f.kind === "float" ? "0.5" : "1"}">`;
+  }
+  const def = f.kind === "choice" ? anSpec.durations[d] : fmtNum(d);
+  return `<div data-f="${f.key}"><label>${esc(f.label)}</label>${input}
+    <div class="hint">${f.hint ? esc(f.hint) + ". " : ""}По умолчанию: ${esc(def)}<span class="pct"></span></div></div>`;
+}
+function readAnForm() {
+  const out = {};
+  $("anForm").querySelectorAll("[data-k]").forEach(i => {
+    const f = anSpec.spec.find(x => x.key === i.dataset.k);
+    out[f.key] = f.kind === "choice" || f.kind === "text" ? i.value : Number(i.value);
+  });
+  return out;
+}
+function markChanged() {
+  const vals = readAnForm();
+  $("anForm").querySelectorAll("[data-f]").forEach(el => {
+    const k = el.dataset.f;
+    el.classList.toggle("changed", String(vals[k]) !== String(anSpec.defaults[k]));
+  });
+  const wkeys = Object.keys(vals).filter(k => k.startsWith("weight_"));
+  const sum = wkeys.reduce((a, k) => a + (vals[k] || 0), 0) || 1;
+  wkeys.forEach(k => { $("anForm").querySelector(`[data-f="${k}"] .pct`).textContent = ` · сейчас ${Math.round((vals[k] || 0) * 100 / sum)}% балла`; });
+  const search = anSpec.search_keys.some(k => String(vals[k]) !== String(anSpec.values[k]));
+  $("anMsg").textContent = search ? "Период или длины поиска изменены: новые поиски будут стоить квоты, уже найденные ниши пересчитаются только по весам." : "";
+}
+async function saveAnSettings(reset) {
+  const res = await fetch(reset ? "/api/settings/reset" : "/api/settings",
+    { method: "POST", body: JSON.stringify({ values: reset ? {} : readAnForm() }) });
+  const out = await res.json();
+  if (!res.ok) { $("anMsg").textContent = out.error; return; }
+  $("anSettings").classList.remove("open");
+  const fresh = await (await fetch("/api/config")).json();
+  Object.assign(cfg, { weights: fresh.weights, criteria: fresh.criteria, units_per_niche: fresh.units_per_niche, auto: fresh.auto });
+  renderCriteria(); updateEstimate(); updateAutoEstimate();
+  if (out.rechecking) { $("run").disabled = $("runAuto").disabled = true; poll(); }
+  else showStatus(out.changed.length ? "Настройки сохранены. Они действуют на следующие запуски." : "Ничего не изменилось.");
+  await loadVault(); render();
+}
+$("anSettingsBtn").addEventListener("click", openAnSettings);
+$("anClose").addEventListener("click", () => $("anSettings").classList.remove("open"));
+$("anSave").addEventListener("click", () => saveAnSettings(false));
+$("anReset").addEventListener("click", () => { if (confirm("Вернуть все настройки анализа по умолчанию?")) saveAnSettings(true); });
 
 function openSettings() {
   $("keysInput").value = "";
@@ -615,7 +772,7 @@ async function checkUpdate(manual) {
 loadConfig().then(() => {
   $("ver").textContent = cfg.version ? `версия ${cfg.version}` : "";
   if (!cfg.keys_configured) openSettings();
-}).then(loadVault).then(loadResults).then(poll).then(checkUpdate);
+}).then(restoreFilters).then(loadVault).then(loadResults).then(poll).then(checkUpdate);
 </script>
 </body>
 </html>

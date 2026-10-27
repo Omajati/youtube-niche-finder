@@ -17,7 +17,7 @@ from statistics import mean, median
 
 from . import config
 
-WEIGHTS = {"outlier": 30, "new_channels": 20, "competition": 15, "evergreen": 15, "stability": 10, "format": 10}
+WEIGHTS = config.WEIGHTS   # меняются в окне «Настройки анализа»
 
 # Признаки трендовой или новостной темы в названиях: такие ролики быстро устаревают
 TREND_WORDS = re.compile(
@@ -26,6 +26,12 @@ TREND_WORDS = re.compile(
     r"actualités?|actu|aujourd'hui|en direct|réaction)\b", re.I)
 
 STOP_TAGS = {"shorts", "short", "video", "youtube", "viral", "trending", "new", "2024", "2025", "2026"}
+
+
+def weighted_total(scores, scale=1):
+    """Итоговый балл 0–100 из оценок критериев (0–1 при scale=100, 0–100 при scale=1)."""
+    weight_sum = sum(WEIGHTS.values()) or 1
+    return sum(scores.get(k, 0) * w for k, w in WEIGHTS.items()) * scale / weight_sum
 
 
 def parse_duration(iso):
@@ -194,7 +200,8 @@ def analyze(query, lang, videos_raw, channels_raw, now=None, uploads=None, searc
     # 1. Аутлайер-фактор: медиана ratio у таких роликов (0.3 -> 0, 10 -> 1, логарифмическая шкала)
     #    и какая доля роликов малых каналов вообще дотягивает до min_views (половина и больше -> 1)
     median_ratio = median(v["ratio"] for v in hits) if hits else 0
-    s_ratio = _clamp((math.log10(median_ratio) + 0.5) / 1.5) if median_ratio > 0 else 0
+    top = math.log10(max(config.RATIO_TARGET, 1.01))
+    s_ratio = _clamp((math.log10(median_ratio) + 0.5) / (top + 0.5)) if median_ratio > 0 else 0
     s_outlier = 0.7 * s_ratio + 0.3 * _clamp(hit_share / 0.5)
 
     # 2. Новые каналы: первый ролик (или создание канала) за последние NEW_CHANNEL_DAYS дней
@@ -203,21 +210,22 @@ def analyze(query, lang, videos_raw, channels_raw, now=None, uploads=None, searc
     for v in videos:
         best_views[v["channel_id"]] = max(best_views[v["channel_id"]], v["views"])
     new_successful = [c for c in new_channels if best_views[c["id"]] >= min_views]
-    s_new = _clamp(len(new_successful) / 3) * 0.8 + _clamp(len(new_channels) / 5) * 0.2
+    s_new = _clamp(len(new_successful) / config.NEW_CHANNELS_TARGET) * 0.8 + _clamp(len(new_channels) / 5) * 0.2
 
     # 3. Конкуренция: доля каналов-миллионников (40% и больше -> 0) и насыщенность темы:
     #    сколько роликов по запросу нашёл YouTube за полгода (до 2 тыс. -> 1, от 200 тыс. -> 0)
     big_share = len(big_channels) / len(used_channels)
-    s_big = 1 - _clamp(big_share / 0.4)
+    s_big = 1 - _clamp(big_share / (config.BIG_SHARE_MAX / 100))
     if search_total:
-        s_saturation = 1 - _clamp((math.log10(max(search_total, 1)) - math.log10(2_000)) / 2)
+        lo, hi = config.SATURATION_LOW, max(config.SATURATION_HIGH, config.SATURATION_LOW * 1.01)
+        s_saturation = 1 - _clamp((math.log10(max(search_total, 1)) - math.log10(lo)) / (math.log10(hi) - math.log10(lo)))
         s_competition = 0.7 * s_big + 0.3 * s_saturation
     else:
         s_competition = s_big
 
     # Вечнозелёность: какая доля успешных роликов старше 2 месяцев (половина и больше -> 1)
     # и сколько из них не похожи на новости и тренды
-    hits_old = [v for v in hits if v["age_days"] >= 60]
+    hits_old = [v for v in hits if v["age_days"] >= config.EVERGREEN_AGE_DAYS]
     trendy = [v for v in hits if TREND_WORDS.search(v["title"])]
     s_evergreen = (0.6 * _clamp((len(hits_old) / len(hits)) / 0.5) + 0.4 * (1 - len(trendy) / len(hits))) if hits else 0
 
@@ -245,7 +253,7 @@ def analyze(query, lang, videos_raw, channels_raw, now=None, uploads=None, searc
         "stability": s_stability,
         "format": s_format,
     }
-    total = sum(scores[k] * w for k, w in WEIGHTS.items())
+    total = weighted_total(scores, scale=100)
 
     tag_counter = Counter()
     for v in ([v for v in hits if v["ratio"] >= 1] or hits):
@@ -256,7 +264,7 @@ def analyze(query, lang, videos_raw, channels_raw, now=None, uploads=None, searc
     result.update(
         score=round(total),
         scores={k: round(v * 100) for k, v in scores.items()},
-        low_data=len(videos) < 10 or len(mature) < 5 or len(hits) < 3,
+        low_data=len(videos) < 10 or len(mature) < 5 or len(hits) < config.LOW_DATA_MIN_HITS,
         metrics={
             "median_ratio_small": round(median_ratio, 2),
             "median_views": int(median(v["views"] for v in videos)),
