@@ -1,10 +1,18 @@
-"""Локальный веб-сервер с дашбордом: python app.py, затем открыть http://localhost:8000"""
+"""Локальный веб-сервер с дашбордом.
+
+python3 app.py           открыть в браузере
+python3 app.py --window  своё окно (так запускает приложение «Поиск ниш» на Mac)
+"""
 import json
+import os
+import socket
+import sys
 import threading
+import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from niche_finder import config, pipeline
+from niche_finder import config, pipeline, updater
 from niche_finder.youtube import YouTubeClient
 
 DASHBOARD = config.ROOT / "dashboard" / "index.html"
@@ -66,6 +74,8 @@ class Handler(BaseHTTPRequestHandler):
                 "seeds": pipeline.DEFAULT_SEEDS,
                 "units_per_niche": pipeline.UNITS_PER_NICHE,
                 "keys_configured": len(config.API_KEYS),
+                "keys_masked": [f"…{k[-4:]}" for k in config.API_KEYS],
+                "version": updater.current(),
                 "quota": YouTubeClient().quota.summary(),
                 "criteria": {
                     "min_duration_min": config.MIN_DURATION_SEC // 60,
@@ -75,6 +85,10 @@ class Handler(BaseHTTPRequestHandler):
                     "search_published_days": config.SEARCH_PUBLISHED_DAYS,
                 },
             })
+        elif self.path == "/api/update/check":
+            self._json(updater.check())
+        elif self.path == "/api/update/status":
+            self._json(updater.state)
         else:
             self._json({"error": "not found"}, 404)
 
@@ -95,6 +109,18 @@ class Handler(BaseHTTPRequestHandler):
                            if not (r["query"] == body.get("query") and r["lang"] == body.get("lang"))]
                 config.RESULTS_FILE.write_text(json.dumps(results, ensure_ascii=False, indent=1), encoding="utf-8")
             self._json({"ok": True})
+        elif self.path == "/api/keys":
+            keys = config.save_api_keys(body.get("keys", ""))
+            self._json({"ok": True, "count": len(keys)})
+        elif self.path == "/api/update/apply":
+            try:
+                updater.start()
+                self._json({"ok": True})
+            except updater.UpdateError as e:
+                self._json({"error": str(e)}, 400)
+        elif self.path == "/api/shutdown":
+            self._json({"ok": True})
+            threading.Timer(0.5, lambda: os._exit(0)).start()
         else:
             self._json({"error": "not found"}, 404)
 
@@ -102,18 +128,69 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
-def main():
-    server = ThreadingHTTPServer(("127.0.0.1", config.PORT), Handler)
-    url = f"http://localhost:{config.PORT}"
-    print(f"Дашборд: {url}  (Ctrl+C чтобы остановить)")
+URL = f"http://127.0.0.1:{config.PORT}"
+
+
+def port_busy():
+    with socket.socket() as s:
+        return s.connect_ex(("127.0.0.1", config.PORT)) == 0
+
+
+def serve():
+    ThreadingHTTPServer(("127.0.0.1", config.PORT), Handler).serve_forever()
+
+
+def run_browser():
+    if port_busy():
+        print("Программа уже запущена, открываю…")
+        webbrowser.open(URL)
+        return
+    print(f"Дашборд: {URL}  (Ctrl+C чтобы остановить)")
     if not config.API_KEYS:
-        print("Внимание: ключи не найдены. Скопируйте .env.example в .env и впишите YOUTUBE_API_KEYS.")
-    threading.Timer(0.8, lambda: webbrowser.open(url)).start()
+        print("Ключи не найдены: впишите их в «Настройках» на дашборде.")
+    threading.Timer(0.8, lambda: webbrowser.open(URL)).start()
     try:
-        server.serve_forever()
+        serve()
     except KeyboardInterrupt:
         pass
 
 
+def run_window():
+    """Своё окно через системный WebKit (pywebview). Если не получилось, открываем в браузере."""
+    try:
+        import webview
+    except Exception as e:
+        print(f"Окно недоступно ({e}), открываю в браузере.")
+        return run_browser()
+    if not port_busy():
+        threading.Thread(target=serve, daemon=True).start()
+    for _ in range(80):
+        if port_busy():
+            break
+        time.sleep(0.25)
+
+    def watch_server():
+        # «Выключить» или обновление останавливают сервер: окно закрывается тоже
+        while port_busy():
+            time.sleep(1)
+        try:
+            win.destroy()
+        except Exception:
+            pass
+
+    win = webview.create_window("Поиск ниш", URL, width=1360, height=880, min_size=(900, 600), text_select=True)
+    webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
+    try:
+        webview.start(lambda: threading.Thread(target=watch_server, daemon=True).start(),
+                      private_mode=False, storage_path=str(config.DATA_DIR / "window"))
+    except Exception as e:
+        print(f"Окно не открылось ({e}), открываю в браузере.")
+        webbrowser.open(URL)
+        while port_busy():
+            time.sleep(5)
+    os._exit(0)  # окно закрыто: программа завершается
+
+
 if __name__ == "__main__":
-    main()
+    os.chdir(config.ROOT)
+    run_window() if "--window" in sys.argv else run_browser()

@@ -139,3 +139,30 @@ class PipelineTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UpdaterTest(unittest.TestCase):
+    def test_copy_parts_keeps_data(self):
+        from niche_finder import updater
+        tmp = Path(tempfile.mkdtemp())
+        src, dest = tmp / "src", tmp / "dest"
+        (src / "niche_finder").mkdir(parents=True)
+        (src / "niche_finder" / "new.py").write_text("new")
+        (src / "VERSION").write_text("2")
+        (dest / "niche_finder").mkdir(parents=True)
+        (dest / "niche_finder" / "old.py").write_text("old")
+        (dest / "data").mkdir()
+        (dest / "data" / ".env").write_text("YOUTUBE_API_KEYS=x")
+        updater._copy_parts(src, dest)
+        self.assertEqual(sorted(p.name for p in (dest / "niche_finder").iterdir()), ["new.py"])
+        self.assertEqual((dest / "VERSION").read_text(), "2")
+        self.assertEqual((dest / "data" / ".env").read_text(), "YOUTUBE_API_KEYS=x")
+
+    def test_check_reports_newer_version(self):
+        from niche_finder import updater
+        orig = updater._latest
+        updater._latest = lambda: {"version": updater.current() + 1, "notes": "x"}
+        try:
+            self.assertTrue(updater.check()["available"])
+        finally:
+            updater._latest = orig

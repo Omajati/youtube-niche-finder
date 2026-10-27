@@ -1,6 +1,7 @@
 """Клиент YouTube Data API v3: ротация ключей при исчерпании квоты и кэш на диске."""
 import hashlib
 import json
+import ssl
 import threading
 import time
 import urllib.error
@@ -12,6 +13,21 @@ from . import config
 
 API_BASE = "https://www.googleapis.com/youtube/v3/"
 SUGGEST_URL = "https://suggestqueries.google.com/complete/search"
+
+
+def ssl_context():
+    """Сертификаты из certifi, если он есть: у Python из приложения системных сертификатов может не быть."""
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
+
+
+def http_get(url, timeout=30, headers=None):
+    req = urllib.request.Request(url, headers={"User-Agent": "youtube-niche-finder/1.0", **(headers or {})})
+    with urllib.request.urlopen(req, timeout=timeout, context=ssl_context()) as resp:
+        return resp.read()
 
 
 class QuotaExhausted(Exception):
@@ -124,9 +140,7 @@ class YouTubeClient:
     # --- низкий уровень ---
 
     def _http_get(self, url):
-        req = urllib.request.Request(url, headers={"User-Agent": "youtube-niche-finder/1.0"})
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            return resp.read()
+        return http_get(url)
 
     def _call(self, endpoint, params):
         cached = self.cache.get(endpoint, params)

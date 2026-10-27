@@ -1,4 +1,4 @@
-"""Настройки: читаются из .env (или переменных окружения)."""
+"""Настройки: читаются из data/.env, .env в корне (или переменных окружения)."""
 import os
 from pathlib import Path
 
@@ -7,18 +7,20 @@ DATA_DIR = ROOT / "data"
 CACHE_DIR = DATA_DIR / "cache"
 RESULTS_FILE = DATA_DIR / "results.json"
 QUOTA_FILE = DATA_DIR / "quota.json"
+# Ключи, вписанные в настройках приложения, хранятся в data/.env: обновление папку data не трогает.
+KEYS_FILE = DATA_DIR / ".env"
 
 
 def _load_dotenv():
-    env_file = ROOT / ".env"
-    if not env_file.exists():
-        return
-    for line in env_file.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
+    for env_file in (KEYS_FILE, ROOT / ".env"):
+        if not env_file.exists():
             continue
-        key, value = line.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
 _load_dotenv()
@@ -28,7 +30,25 @@ def _int(name, default):
     return int(os.environ.get(name, default))
 
 
-API_KEYS = [k.strip() for k in os.environ.get("YOUTUBE_API_KEYS", "").split(",") if k.strip()]
+def _split_keys(text):
+    return [k.strip() for k in text.replace("\n", ",").split(",") if k.strip()]
+
+
+API_KEYS = _split_keys(os.environ.get("YOUTUBE_API_KEYS", ""))
+
+
+def save_api_keys(text):
+    """Сохраняет ключи из настроек приложения в data/.env и сразу начинает ими пользоваться."""
+    keys = _split_keys(text)
+    lines = []
+    if KEYS_FILE.exists():
+        lines = [l for l in KEYS_FILE.read_text(encoding="utf-8").splitlines()
+                 if not l.strip().startswith("YOUTUBE_API_KEYS=")]
+    lines.insert(0, "YOUTUBE_API_KEYS=" + ",".join(keys))
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    KEYS_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    API_KEYS[:] = keys
+    return keys
 
 LANGUAGES = {"en": "English", "es": "Español", "de": "Deutsch", "fr": "Français"}
 
@@ -56,4 +76,4 @@ CACHE_TTL_HOURS = {
 UNIT_COST = {"search": 100, "videos": 1, "channels": 1}
 DAILY_QUOTA_PER_KEY = 10_000
 
-PORT = _int("PORT", 8000)
+PORT = _int("PORT", 8766)
