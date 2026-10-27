@@ -18,8 +18,8 @@ DEFAULT_SEEDS = {
            "histoire oubliée", "faits étranges"],
 }
 
-# Примерная стоимость анализа одной ниши: 1 search (100) + videos (1) + channels (1)
-UNITS_PER_NICHE = 102
+# Примерная стоимость анализа одной ниши: по поиску (100) на каждую длительность + videos и channels
+UNITS_PER_NICHE = 100 * max(len(config.SEARCH_DURATIONS), 1) + 4
 
 _lock = threading.Lock()
 
@@ -41,7 +41,9 @@ def save_result(item):
 
 
 def analyze_niche(client, query, lang):
-    video_ids = client.search_videos(query, lang)
+    video_ids = []
+    for duration in config.SEARCH_DURATIONS or [None]:
+        video_ids += client.search_videos(query, lang, duration)
     videos = client.videos(video_ids)
     channel_ids = [v["snippet"]["channelId"] for v in videos]
     channels = client.channels(channel_ids)

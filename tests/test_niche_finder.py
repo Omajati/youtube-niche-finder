@@ -55,6 +55,17 @@ class ScoringTest(unittest.TestCase):
         self.assertEqual((r["videos_long"], r["skipped_short"], r["skipped_lang"]), (1, 1, 1))
         self.assertTrue(r["low_data"])
 
+    def test_filters_foreign_titles_without_declared_language(self):
+        chs = [channel("a", 1000, 500), channel("b", 1000, 500)]
+        hindi = video("h", "a", 9999)
+        hindi["snippet"]["title"] = "The Untold History of Air Plane || Hindi Documentary"
+        script = video("s", "b", 9999)
+        script["snippet"]["title"] = "हवाई जहाज का इतिहास"
+        ok = video("ok", "b", 9999)
+        ok["snippet"]["title"] = "L'histoire méconnue de l'aéronautique"
+        r = analyze("q", "fr", [hindi, script, ok], chs, now=NOW)
+        self.assertEqual((r["videos_long"], r["skipped_lang"]), (1, 2))
+
     def test_empty(self):
         self.assertEqual(analyze("q", "en", [], [], now=NOW)["score"], 0)
 
@@ -97,7 +108,7 @@ class PipelineTest(unittest.TestCase):
         status = pipeline.run(["q"], ["en"], expand=2, max_niches=3, client=client)
         self.assertEqual(status["state"], "finished")
         self.assertEqual(status["done"], 3)
-        self.assertEqual(status["units"], 3 * 100 + 2)  # одинаковые videos/channels берутся из кэша
+        self.assertEqual(status["units"], 3 * 200 + 2)  # 2 поиска на нишу (medium + long)  # одинаковые videos/channels берутся из кэша
         self.assertEqual({r["query"] for r in pipeline.load_results()}, {"q", "q one", "q two"})
         self.assertTrue(client.quota.summary()["keys"][0]["exhausted"])
         self.assertEqual(sum("key=KEY_ONE" in u for u in client.calls), 1)  # после исчерпания ключ не трогаем

@@ -39,6 +39,9 @@ BIG_CHANNEL_SUBS = _int("BIG_CHANNEL_SUBS", 1_000_000)
 NEW_CHANNEL_DAYS = _int("NEW_CHANNEL_DAYS", 90)       # «новый канал» = создан за 3 месяца
 NEW_CHANNEL_MIN_VIEWS = _int("NEW_CHANNEL_MIN_VIEWS", 10_000)
 SEARCH_PUBLISHED_DAYS = _int("SEARCH_PUBLISHED_DAYS", 180)  # ищем видео за последние N дней
+# Отдельный поиск на каждую длительность: medium = 4–20 мин, long = больше 20 мин.
+# Без фильтра выдача забита шортсами, а каждый поиск стоит 100 единиц квоты.
+SEARCH_DURATIONS = [d.strip() for d in os.environ.get("SEARCH_DURATIONS", "medium,long").split(",") if d.strip()]
 
 # Сколько живёт кэш ответов API (часы)
 CACHE_TTL_HOURS = {

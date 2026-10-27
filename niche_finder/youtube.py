@@ -162,7 +162,7 @@ class YouTubeClient:
 
     # --- запросы ---
 
-    def search_videos(self, query, lang, max_results=50):
+    def search_videos(self, query, lang, duration=None, max_results=50):
         published_after = (datetime.now(timezone.utc) - timedelta(days=config.SEARCH_PUBLISHED_DAYS))
         params = {
             "part": "snippet",
@@ -174,6 +174,8 @@ class YouTubeClient:
             # округляем до дня, чтобы кэш срабатывал весь день
             "publishedAfter": published_after.strftime("%Y-%m-%dT00:00:00Z"),
         }
+        if duration:
+            params["videoDuration"] = duration
         data = self._call("search", params)
         return [item["id"]["videoId"] for item in data.get("items", []) if item.get("id", {}).get("videoId")]
 

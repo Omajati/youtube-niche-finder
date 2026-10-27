@@ -9,6 +9,7 @@
 """
 import math
 import re
+import unicodedata
 from collections import Counter
 from datetime import datetime, timezone
 from statistics import mean, median
@@ -37,9 +38,22 @@ def _clamp(x):
     return max(0.0, min(1.0, x))
 
 
-def _video_lang_ok(snippet, lang):
+FOREIGN_WORDS = re.compile(r"\b(hindi|urdu|tamil|telugu|bangla|bengali|marathi|punjabi|kannada|malayalam|"
+                           r"tagalog|indonesia|bahasa|türkçe|arabic)\b", re.I)
+
+
+def _non_latin(text):
+    """Есть ли в тексте буквы не латиницей (деванагари, кириллица, арабская вязь и т.д.)."""
+    return any(ch.isalpha() and not unicodedata.name(ch, "").startswith("LATIN") for ch in text)
+
+
+def _video_lang_ok(snippet, lang, channel_title=""):
     declared = snippet.get("defaultAudioLanguage") or snippet.get("defaultLanguage")
-    return not declared or declared.lower().startswith(lang)
+    if declared:
+        return declared.lower().startswith(lang)
+    # язык не указан: отсекаем по письменности и явным пометкам вроде «Hindi Documentary»
+    text = snippet.get("title", "") + " " + channel_title
+    return not _non_latin(text) and not FOREIGN_WORDS.search(text)
 
 
 def analyze(query, lang, videos_raw, channels_raw, now=None):
@@ -69,10 +83,10 @@ def analyze(query, lang, videos_raw, channels_raw, now=None):
         if duration < config.MIN_DURATION_SEC:
             skipped_short += 1
             continue
-        if not _video_lang_ok(sn, lang):
+        ch = channels.get(sn["channelId"])
+        if not _video_lang_ok(sn, lang, ch["title"] if ch else ""):
             skipped_lang += 1
             continue
-        ch = channels.get(sn["channelId"])
         if not ch or ch["subs"] is None:
             continue
         views = int(v.get("statistics", {}).get("viewCount", 0))
