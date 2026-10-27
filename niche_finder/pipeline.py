@@ -3,7 +3,7 @@ import json
 import threading
 
 from . import config
-from .scoring import analyze
+from .scoring import analyze, is_excluded_channel
 from .youtube import NoApiKeys, QuotaExhausted, YouTubeClient
 
 # Стартовые темы для автопоиска, если запрос не задан
@@ -50,6 +50,7 @@ def analyze_niche(client, query, lang):
     channels = client.channels(channel_ids)
     # Реальная частота загрузок и дата первого ролика: только у малых каналов, они и есть ориентир
     small = [c for c in channels if not c["statistics"].get("hiddenSubscriberCount")
+             and not is_excluded_channel(c["snippet"].get("country"))
              and int(c["statistics"].get("subscriberCount", 0)) <= config.SMALL_CHANNEL_MAX_SUBS]
     small.sort(key=lambda c: int(c["statistics"].get("subscriberCount", 0)))
     uploads = {c["id"]: client.recent_uploads(c["id"]) for c in small[:config.UPLOADS_CHECK_CHANNELS]}

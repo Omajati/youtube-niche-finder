@@ -40,6 +40,25 @@ def _clamp(x):
 
 FOREIGN_WORDS = re.compile(r"\b(hindi|urdu|tamil|telugu|bangla|bengali|marathi|punjabi|kannada|malayalam|"
                            r"tagalog|indonesia|bahasa|türkçe|arabic)\b", re.I)
+# Хинглиш: хинди латиницей. Эти слова не встречаются в английском, испанском, немецком и французском.
+HINGLISH_WORDS = re.compile(r"\b(hai|hain|kya|kaise|kyun|kyu|aur|nahi|kahani|rahasya|itihas|duniya|"
+                            r"bhai|bhaiya|ki kahani|ka sach|ka rahasya)\b", re.I)
+SOUTH_ASIAN_SCRIPTS = ("DEVANAGARI", "BENGALI", "GURMUKHI", "GUJARATI", "ORIYA", "TAMIL", "TELUGU", "KANNADA",
+                       "MALAYALAM", "SINHALA", "ARABIC")
+
+
+def _south_asian(text):
+    return any(unicodedata.name(ch, "").startswith(SOUTH_ASIAN_SCRIPTS) for ch in text if ch.isalpha())
+
+
+def is_excluded_channel(country):
+    return (country or "").upper() in config.EXCLUDE_COUNTRIES
+
+
+def _south_asian_video(snippet, channel_title):
+    """Индийские и соседние каналы не смотрим совсем, даже если ролик на английском."""
+    text = " ".join([snippet.get("title", ""), channel_title, snippet.get("description", "")[:500]])
+    return _south_asian(text) or bool(HINGLISH_WORDS.search(snippet.get("title", "") + " " + channel_title))
 
 
 def _non_latin(text):
@@ -84,6 +103,7 @@ def analyze(query, lang, videos_raw, channels_raw, now=None, uploads=None):
         channels[c["id"]] = {
             "id": c["id"],
             "title": c["snippet"]["title"],
+            "country": c["snippet"].get("country", ""),
             "subs": None if st.get("hiddenSubscriberCount") else int(st.get("subscriberCount", 0)),
             "views": int(st.get("viewCount", 0)),
             "video_count": video_count,
@@ -103,7 +123,7 @@ def analyze(query, lang, videos_raw, channels_raw, now=None, uploads=None):
                 ch["active_days"] = min(first_days, age_days)
 
     videos = []
-    skipped_short = skipped_lang = 0
+    skipped_short = skipped_lang = skipped_region = 0
     for v in videos_raw:
         sn = v["snippet"]
         duration = parse_duration(v.get("contentDetails", {}).get("duration"))
@@ -111,6 +131,9 @@ def analyze(query, lang, videos_raw, channels_raw, now=None, uploads=None):
             skipped_short += 1
             continue
         ch = channels.get(sn["channelId"])
+        if ch and (is_excluded_channel(ch["country"]) or _south_asian_video(sn, ch["title"])):
+            skipped_region += 1
+            continue
         if not _video_lang_ok(sn, lang, ch["title"] if ch else ""):
             skipped_lang += 1
             continue
@@ -141,6 +164,7 @@ def analyze(query, lang, videos_raw, channels_raw, now=None, uploads=None):
         "videos_long": len(videos),
         "skipped_short": skipped_short,
         "skipped_lang": skipped_lang,
+        "skipped_region": skipped_region,
     }
     if not videos:
         result.update(score=0, scores={k: 0 for k in WEIGHTS}, low_data=True, metrics={},

@@ -64,7 +64,7 @@ class ScoringTest(unittest.TestCase):
         ok = video("ok", "b", 9999)
         ok["snippet"]["title"] = "L'histoire méconnue de l'aéronautique"
         r = analyze("q", "fr", [hindi, script, ok], chs, now=NOW)
-        self.assertEqual((r["videos_long"], r["skipped_lang"]), (1, 2))
+        self.assertEqual((r["videos_long"], r["skipped_lang"], r["skipped_region"]), (1, 1, 1))
 
     def test_low_view_videos_are_not_hits(self):
         # у крошечных каналов ratio огромный, но до 10K просмотров не дотягивает никто
@@ -101,6 +101,17 @@ class ScoringTest(unittest.TestCase):
         self.assertEqual(ch["long_uploads_90d"], 3)
         self.assertLess(ch["uploads_per_week"], 1)
         self.assertEqual(analyze("q", "en", vids, chs, now=NOW)["metrics"]["new_successful"], 0)
+
+    def test_skips_south_asian_channels(self):
+        chs = [channel("in", 3000, 500), channel("hg", 3000, 500), channel("ok", 3000, 500)]
+        chs[0]["snippet"]["country"] = "IN"
+        v_in = video("a", "in", 50_000, lang="en")          # английский ролик, но канал из Индии
+        v_hg = video("b", "hg", 50_000)
+        v_hg["snippet"]["title"] = "Titanic ka rahasya | sach kya hai"
+        v_ok = video("c", "ok", 50_000)
+        v_ok["snippet"]["title"] = "What really happened to the Titanic"
+        r = analyze("q", "en", [v_in, v_hg, v_ok], chs, now=NOW)
+        self.assertEqual((r["videos_long"], r["skipped_region"]), (1, 2))
 
     def test_empty(self):
         self.assertEqual(analyze("q", "en", [], [], now=NOW)["score"], 0)

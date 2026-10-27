@@ -1,5 +1,5 @@
 {
- "version": 3,
- "notes": "точнее анализ: свежие ролики, реальная частота загрузок, новые каналы по первому ролику, пороги по рынкам",
+ "version": 4,
+ "notes": "индийские каналы больше не учитываются",
  "app_zip": "https://raw.githubusercontent.com/Omajati/youtube-niche-finder/main/release/NicheFinder.zip"
 }
