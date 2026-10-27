@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Поиск ниш YouTube</title>
+<link rel="icon" href="/icon.png">
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #677085; --line: #e3e6ec;
+  --accent: #2f6fe4; --accent-soft: #e6eefc; --good: #1f9d55; --mid: #d69e2e; --bad: #d64545;
+  --bar: #dfe4ec;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12151b; --panel: #1b2029; --text: #e6e9ef; --muted: #8d96a8; --line: #2a313d;
+    --accent: #6b9cff; --accent-soft: #1f2d48; --good: #3fbf7f; --mid: #e0b04a; --bad: #ef6b6b;
+    --bar: #2a313d;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+header { padding: 18px 24px 8px; display: flex; gap: 16px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; }
+.top-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.top-actions .ver { color: var(--muted); font-size: 12px; }
+button.update { background: var(--good); }
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; padding: 16px; z-index: 10; }
+.modal.open { display: flex; }
+.modal .panel { width: 100%; max-width: 520px; }
+.modal ol { padding-left: 18px; margin: 8px 0; color: var(--muted); font-size: 13px; }
+h1 { font-size: 20px; margin: 0 0 4px; }
+.sub { color: var(--muted); font-size: 13px; }
+main { padding: 8px 24px 40px; display: grid; gap: 16px; grid-template-columns: 340px 1fr; align-items: start; }
+@media (max-width: 960px) { main { grid-template-columns: 1fr; padding: 8px 16px 40px; } header { padding: 16px 16px 8px; } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+.panel h2 { font-size: 15px; margin: 0 0 12px; }
+label { display: block; font-weight: 600; margin: 12px 0 6px; font-size: 13px; }
+textarea, input[type=number], select { width: 100%; background: var(--bg); color: var(--text);
+  border: 1px solid var(--line); border-radius: 6px; padding: 8px; font: inherit; }
+textarea { min-height: 110px; resize: vertical; }
+.langs { display: flex; flex-wrap: wrap; gap: 8px; }
+.langs label { display: inline-flex; gap: 6px; align-items: center; font-weight: 400; margin: 0;
+  border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; cursor: pointer; }
+.row { display: flex; gap: 10px; }
+.row > div { flex: 1; }
+.hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
+button { background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 9px 14px;
+  font: inherit; font-weight: 600; cursor: pointer; }
+button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--line); font-weight: 500; }
+button:disabled { opacity: .5; cursor: default; }
+.actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+.status { margin-top: 12px; font-size: 13px; padding: 8px 10px; border-radius: 6px; background: var(--accent-soft); display: none; }
+.status.err { background: color-mix(in srgb, var(--bad) 15%, transparent); }
+.quota { margin-top: 14px; font-size: 12px; color: var(--muted); }
+.quota div { display: flex; justify-content: space-between; padding: 2px 0; }
+.toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+.toolbar select { width: auto; }
+.toolbar .count { color: var(--muted); margin-left: auto; font-size: 13px; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; white-space: nowrap; }
+th { font-size: 12px; color: var(--muted); font-weight: 600; cursor: pointer; user-select: none; }
+td.q { white-space: normal; min-width: 180px; font-weight: 600; }
+tr.item { cursor: pointer; }
+tr.item:hover td { background: var(--accent-soft); }
+.score { display: inline-block; min-width: 38px; text-align: center; font-weight: 700; border-radius: 6px; padding: 3px 6px; color: #fff; }
+.lang { font-size: 11px; text-transform: uppercase; border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; color: var(--muted); }
+.badge { font-size: 11px; color: var(--mid); margin-left: 6px; font-weight: 500; }
+.bars { display: flex; gap: 3px; align-items: flex-end; height: 22px; }
+.bars span { width: 9px; background: var(--accent); border-radius: 2px 2px 0 0; display: block; }
+.bars i { display: flex; align-items: flex-end; height: 22px; width: 9px; background: var(--bar); border-radius: 2px; }
+.detail td { background: var(--bg); white-space: normal; padding: 16px; }
+.dgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.metric { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; }
+.metric b { display: block; font-size: 17px; }
+.metric span { color: var(--muted); font-size: 12px; }
+.crit { display: grid; grid-template-columns: 170px 1fr 40px; gap: 8px; align-items: center; margin: 4px 0; font-size: 13px; }
+.crit .track { height: 8px; background: var(--bar); border-radius: 4px; overflow: hidden; }
+.crit .fill { height: 100%; background: var(--accent); }
+@media (max-width: 600px) { .crit { grid-template-columns: 120px 1fr 34px; } }
+h3 { font-size: 13px; margin: 16px 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.videos { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.video { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; color: inherit; text-decoration: none; }
+.video img { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; background: var(--bar); }
+.video > div { padding: 8px 10px; font-size: 12px; }
+.video .t { font-weight: 600; font-size: 13px; margin-bottom: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.video .m { color: var(--muted); }
+.ratio { color: var(--good); font-weight: 700; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 14px; padding: 3px 10px; font-size: 12px; cursor: pointer; font-weight: 400; }
+.chip:hover { border-color: var(--accent); color: var(--accent); }
+.ch-table td, .ch-table th { padding: 6px 8px; font-size: 12px; }
+.new { color: var(--good); font-weight: 600; }
+.empty { color: var(--muted); padding: 30px 0; text-align: center; }
+a { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Поиск ниш YouTube</h1>
+    <div class="sub" id="criteria">Длинные видео, малые каналы, без миллионников</div>
+  </div>
+  <div class="top-actions">
+    <button class="update" id="updateBtn" style="display:none">Обновить</button>
+    <button class="ghost" id="settingsBtn">Настройки</button>
+    <button class="ghost" id="quitBtn">Выключить</button>
+    <span class="ver" id="ver"></span>
+  </div>
+</header>
+<div class="modal" id="settings">
+  <div class="panel">
+    <h2>Ключи YouTube API</h2>
+    <label for="keysInput">По одному ключу в строке (до 4 штук, от разных Google-аккаунтов)</label>
+    <textarea id="keysInput" placeholder="AIza..."></textarea>
+    <div class="hint" id="keysNow"></div>
+    <ol>
+      <li><a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener">Создайте проект</a> в Google Cloud (карта не нужна, пробный период пропустите).</li>
+      <li><a href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noopener">Включите YouTube Data API v3</a> (Enable).</li>
+      <li><a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Create credentials → API key</a> и вставьте ключ сюда.</li>
+    </ol>
+    <div class="actions">
+      <button id="keysSave">Сохранить</button>
+      <button class="ghost" id="keysClose">Закрыть</button>
+    </div>
+  </div>
+</div>
+<main>
+  <section class="panel">
+    <h2>Новый анализ</h2>
+    <label for="queries">Темы (по одной в строке, на языке рынка)</label>
+    <textarea id="queries" placeholder="unsolved mysteries&#10;strange true stories"></textarea>
+    <div class="hint">Пусто: возьмём стартовые темы для каждого языка.</div>
+    <label>Языки</label>
+    <div class="langs" id="langs"></div>
+    <div class="row">
+      <div>
+        <label for="expand">Подсказок YouTube на тему</label>
+        <input type="number" id="expand" min="0" max="10" value="3">
+      </div>
+      <div>
+        <label for="max">Максимум ниш</label>
+        <input type="number" id="max" min="1" max="50" value="8">
+      </div>
+    </div>
+    <div class="hint" id="estimate"></div>
+    <div class="actions">
+      <button id="run">Запустить анализ</button>
+      <button class="ghost" id="seeds">Показать стартовые темы</button>
+    </div>
+    <div class="status" id="status"></div>
+    <div class="quota" id="quota"></div>
+  </section>
+
+  <section class="panel">
+    <div class="toolbar">
+      <select id="filterLang"><option value="">Все языки</option></select>
+      <label style="margin:0;font-weight:400;display:inline-flex;gap:6px;align-items:center">
+        <input type="checkbox" id="hideLow"> скрыть «мало данных»
+      </label>
+      <span class="count" id="count"></span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th data-sort="score">Балл</th>
+          <th data-sort="query">Ниша</th>
+          <th data-sort="lang">Язык</th>
+          <th title="Аутлайер · Новые · Конкуренция · Стабильность · Формат">Критерии</th>
+          <th data-sort="m.median_ratio_small" title="Медиана просмотры/подписчики у малых каналов">Просм./подп.</th>
+          <th data-sort="m.hits_small" title="Ролики малых каналов, набравшие порог просмотров (EN 10K, остальные 5K)">Ролики с порогом</th>
+          <th data-sort="m.new_successful" title="Новые каналы (≤3 мес.) с хорошими просмотрами / всего новых">Новые</th>
+          <th data-sort="m.big_share">Миллионники</th>
+          <th data-sort="m.avg_length_successful_min">Длина</th>
+        </tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="empty">Пока нет результатов. Запустите анализ слева.</div>
+  </section>
+</main>
+
+<script>
+const CRIT = [
+  ["outlier", "Просмотры ≫ подписчики", 35],
+  ["new_channels", "Новые каналы растут", 25],
+  ["competition", "Мало миллионников", 20],
+  ["stability", "Стабильный спрос", 10],
+  ["format", "Формат и нагрузка", 10],
+];
+let cfg = null, results = [], sortKey = "score", sortDir = -1, openKey = null, polling = null;
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmt = n => n >= 1e6 ? (n / 1e6).toFixed(1).replace(".0", "") + "M" : n >= 1e3 ? Math.round(n / 1e3) + "K" : String(n ?? 0);
+const color = s => s >= 65 ? "var(--good)" : s >= 40 ? "var(--mid)" : "var(--bad)";
+const key = r => r.lang + "|" + r.query;
+
+async function loadConfig() {
+  cfg = await (await fetch("/api/config")).json();
+  const c = cfg.criteria;
+  $("criteria").textContent = `Видео от ${c.min_duration_min} мин за последние ${c.search_published_days} дней · малые каналы до ${fmt(c.small_channel_max_subs)} подписчиков · миллионники от ${fmt(c.big_channel_subs)} считаются конкуренцией · «новый канал» младше ${c.new_channel_days} дней`;
+  $("langs").innerHTML = Object.entries(cfg.languages).map(([code, name]) =>
+    `<label><input type="checkbox" value="${code}" ${code === "en" ? "checked" : ""}> ${name}</label>`).join("");
+  $("filterLang").innerHTML = `<option value="">Все языки</option>` +
+    Object.entries(cfg.languages).map(([c, n]) => `<option value="${c}">${n}</option>`).join("");
+  renderQuota(cfg.quota);
+  updateEstimate();
+}
+
+function renderQuota(q) {
+  if (!cfg.keys_configured) {
+    $("quota").innerHTML = `<b style="color:var(--bad)">Ключи API не заданы.</b> <a href="#" id="openKeys">Впишите их в настройках</a>.`;
+    $("openKeys").onclick = e => { e.preventDefault(); openSettings(); };
+    return;
+  }
+  $("quota").innerHTML = `<div><b>Квота сегодня</b><span>${q.day}</span></div>` + q.keys.map(k =>
+    `<div><span>${esc(k.key)}</span><span>${k.invalid ? "ключ не работает" : k.exhausted ? "исчерпан" : `≈${k.left_estimate.toLocaleString("ru")} ед.`}</span></div>`).join("");
+}
+
+function selectedLangs() { return [...document.querySelectorAll("#langs input:checked")].map(i => i.value); }
+function queries() { return $("queries").value.split("\n").map(s => s.trim()).filter(Boolean); }
+
+function updateEstimate() {
+  if (!cfg) return;
+  const langs = selectedLangs().length || 1, exp = +$("expand").value || 0, max = +$("max").value || 1;
+  const base = queries().length || 5;
+  const n = Math.min(max, base * (1 + exp) * langs);
+  const units = n * cfg.units_per_niche;
+  $("estimate").textContent = `До ${n} ниш ≈ ${units.toLocaleString("ru")} единиц квоты (у одного ключа 10 000 в день). Повторный анализ в течение 3 дней берётся из кэша бесплатно.`;
+}
+
+async function run() {
+  const body = { queries: queries(), langs: selectedLangs(), expand: +$("expand").value, max_niches: +$("max").value };
+  if (!body.langs.length) return showStatus("Выберите хотя бы один язык", true);
+  const res = await fetch("/api/run", { method: "POST", body: JSON.stringify(body) });
+  const data = await res.json();
+  if (!res.ok) return showStatus(data.error, true);
+  $("run").disabled = true;
+  poll();
+}
+
+function showStatus(text, err) {
+  const el = $("status");
+  el.style.display = "block";
+  el.className = "status" + (err ? " err" : "");
+  el.innerHTML = text;
+}
+
+async function poll() {
+  clearTimeout(polling);
+  const s = await (await fetch("/api/status")).json();
+  if (s.state === "running") {
+    showStatus(`Анализ: ${s.done}/${s.total || "?"}${s.current ? ` · сейчас <b>${esc(s.current)}</b>` : ""} · потрачено ${s.units || 0} ед.`);
+    await loadResults();
+    polling = setTimeout(poll, 1500);
+    return;
+  }
+  $("run").disabled = false;
+  if (s.state === "idle") return;
+  const errs = (s.errors || []).map(e => "<br>" + esc(e)).join("");
+  const label = { finished: "Готово", quota_exhausted: "Квота закончилась на всех ключах", error: "Ошибка" }[s.state] || s.state;
+  showStatus(`${label}: проанализировано ${s.done || 0} ниш, потрачено ${s.units || 0} ед.${errs}`, s.state !== "finished");
+  await loadResults();
+  cfg.quota = (await (await fetch("/api/config")).json()).quota;
+  renderQuota(cfg.quota);
+}
+
+async function loadResults() {
+  results = await (await fetch("/api/results")).json();
+  render();
+}
+
+function val(r, k) { return k.startsWith("m.") ? (r.metrics || {})[k.slice(2)] ?? 0 : r[k]; }
+
+function render() {
+  const lang = $("filterLang").value, hideLow = $("hideLow").checked;
+  const rows = results.filter(r => (!lang || r.lang === lang) && (!hideLow || !r.low_data))
+    .sort((a, b) => { const x = val(a, sortKey), y = val(b, sortKey); return (x > y ? 1 : x < y ? -1 : 0) * sortDir; });
+  $("empty").style.display = rows.length ? "none" : "block";
+  $("count").textContent = results.length ? `${rows.length} из ${results.length}` : "";
+  $("rows").innerHTML = rows.map(r => {
+    const m = r.metrics || {};
+    const bars = CRIT.map(([k, n]) => `<i title="${n}: ${r.scores[k]}"><span style="height:${Math.max(r.scores[k], 4)}%"></span></i>`).join("");
+    const main = `<tr class="item" data-key="${esc(key(r))}">
+      <td><span class="score" style="background:${color(r.score)}">${r.score}</span></td>
+      <td class="q">${esc(r.query)}${r.low_data ? '<span class="badge">мало данных</span>' : ""}</td>
+      <td><span class="lang">${r.lang}</span></td>
+      <td><div class="bars">${bars}</div></td>
+      <td>${m.median_ratio_small ?? "–"}×</td>
+      <td>${m.hits_small ?? "–"}</td>
+      <td>${m.new_successful ?? 0} / ${m.new_channels ?? 0}</td>
+      <td>${m.big_share ?? 0}%</td>
+      <td>${m.avg_length_successful_min ?? "–"} мин</td>
+    </tr>`;
+    return main + (openKey === key(r) ? detail(r) : "");
+  }).join("");
+}
+
+function detail(r) {
+  const m = r.metrics || {};
+  const mv = fmt(m.min_views || 10000);
+  const metric = (v, l) => `<div class="metric"><b>${v}</b><span>${l}</span></div>`;
+  const crit = CRIT.map(([k, n, w]) => `<div class="crit"><span>${n} <span style="color:var(--muted)">${w}%</span></span>
+    <div class="track"><div class="fill" style="width:${r.scores[k]}%;background:${color(r.scores[k])}"></div></div><b>${r.scores[k]}</b></div>`).join("");
+  const videos = (r.top_videos || []).map(v => `<a class="video" href="https://www.youtube.com/watch?v=${esc(v.id)}" target="_blank" rel="noopener">
+    <img loading="lazy" src="https://i.ytimg.com/vi/${esc(v.id)}/mqdefault.jpg" alt="">
+    <div><div class="t">${esc(v.title)}</div>
+    <div class="m">${esc(v.channel)} · ${fmt(v.subs)} подп.</div>
+    <div class="m">${fmt(v.views)} просм.${v.views_per_day ? ` (${fmt(v.views_per_day)}/день)` : ""} · <span class="ratio">${v.ratio}×</span> · ${v.duration_min} мин · ${v.published}</div></div></a>`).join("");
+  const channels = (r.channels || []).map(c => `<tr>
+    <td><a href="https://www.youtube.com/channel/${esc(c.id)}" target="_blank" rel="noopener">${esc(c.title)}</a>${c.is_new ? ' <span class="new">новый</span>' : ""}</td>
+    <td>${fmt(c.subs)}</td><td>${fmt(c.best_views)}</td><td>${c.video_count}</td><td>${c.uploads_per_week}${c.uploads_exact ? "" : "≈"}</td><td>${c.created}</td></tr>`).join("");
+  const related = (r.related || []).map(t => `<button class="chip" data-tag="${esc(t)}">${esc(t)}</button>`).join("");
+  return `<tr class="detail"><td colspan="9">
+    <div class="dgrid">
+      ${metric(m.median_ratio_small + "×", `медиана просм./подп. у роликов от ${mv}`)}
+      ${metric(`${m.hits_small ?? 0} (${m.hit_share_small ?? 0}%)`, `роликов малых каналов от ${mv} просм.`)}
+      ${metric(`${m.new_successful} из ${m.new_channels}`, `новых каналов с ≥${mv} просм.`)}
+      ${metric(`${m.big_channels} из ${m.channels}`, "каналов-миллионников")}
+      ${metric(m.avg_length_successful_min + " мин", "средняя длина успешных роликов")}
+      ${metric(m.uploads_per_week_successful + " в нед.", "частота загрузок успешных каналов")}
+      ${metric(m.top_video_share + "%", "доля просмотров у топ-ролика")}
+      ${metric(`${r.videos_long} из ${r.videos_found}`, "роликов от 8 мин в выдаче")}
+    </div>
+    ${crit}
+    <h3>Лучшие ролики малых каналов (от ${mv} просмотров)</h3><div class="videos">${videos || `<span class="hint">нет роликов от ${mv}</span>`}</div>
+    <h3>Каналы</h3><div class="table-wrap"><table class="ch-table"><thead><tr><th>Канал</th><th>Подписчики</th><th>Лучший ролик</th><th>Видео</th><th title="Длинные ролики в неделю за последние 3 месяца">В неделю</th><th>Создан</th></tr></thead><tbody>${channels}</tbody></table></div>
+    <h3>Похожие подниши (теги успешных роликов, нажмите чтобы добавить)</h3><div class="chips">${related || '<span class="hint">нет тегов</span>'}</div>
+    <div class="actions"><button class="ghost" data-del="${esc(key(r))}">Удалить из списка</button>
+      <span class="hint">Проанализировано ${r.analyzed_at.slice(0, 16).replace("T", " ")}</span></div>
+  </td></tr>`;
+}
+
+$("rows").addEventListener("click", async e => {
+  const tag = e.target.closest("[data-tag]");
+  if (tag) {
+    const q = $("queries");
+    q.value = (q.value.trim() ? q.value.trim() + "\n" : "") + tag.dataset.tag;
+    const r = results.find(x => key(x) === openKey);
+    if (r) document.querySelectorAll("#langs input").forEach(i => i.checked = i.value === r.lang);
+    updateEstimate();
+    tag.disabled = true;
+    return;
+  }
+  const del = e.target.closest("[data-del]");
+  if (del) {
+    const r = results.find(x => key(x) === del.dataset.del);
+    await fetch("/api/delete", { method: "POST", body: JSON.stringify({ query: r.query, lang: r.lang }) });
+    openKey = null;
+    return loadResults();
+  }
+  if (e.target.closest("a, .detail")) return;
+  const row = e.target.closest("tr.item");
+  if (row) { openKey = openKey === row.dataset.key ? null : row.dataset.key; render(); }
+});
+document.querySelectorAll("th[data-sort]").forEach(th => th.addEventListener("click", () => {
+  const k = th.dataset.sort;
+  sortDir = sortKey === k ? -sortDir : (k === "query" || k === "lang" || k === "m.big_share" ? 1 : -1);
+  sortKey = k;
+  render();
+}));
+$("filterLang").addEventListener("change", render);
+$("hideLow").addEventListener("change", render);
+$("run").addEventListener("click", run);
+$("seeds").addEventListener("click", () => {
+  const langs = selectedLangs();
+  $("queries").value = (cfg.seeds[langs[0] || "en"] || []).join("\n");
+  if (langs.length > 1) showStatus("Стартовые темы показаны для первого языка. Темы пишутся на языке рынка, поэтому для других языков лучше запускать отдельно.");
+  updateEstimate();
+});
+["queries", "expand", "max"].forEach(id => $(id).addEventListener("input", updateEstimate));
+$("langs").addEventListener("change", updateEstimate);
+
+function openSettings() {
+  $("keysInput").value = "";
+  $("keysNow").textContent = cfg.keys_configured
+    ? `Сейчас задано ключей: ${cfg.keys_configured} (${cfg.keys_masked.join(", ")}). Новые ключи заменят их.`
+    : "Ключи пока не заданы.";
+  $("settings").classList.add("open");
+}
+$("settingsBtn").addEventListener("click", openSettings);
+$("keysClose").addEventListener("click", () => $("settings").classList.remove("open"));
+$("keysSave").addEventListener("click", async () => {
+  const keys = $("keysInput").value.trim();
+  if (!keys) return;
+  await fetch("/api/keys", { method: "POST", body: JSON.stringify({ keys }) });
+  $("settings").classList.remove("open");
+  await loadConfig();
+});
+$("quitBtn").addEventListener("click", async () => {
+  if (!confirm("Выключить программу?")) return;
+  try { await fetch("/api/shutdown", { method: "POST", body: "{}" }); } catch (e) {}
+  document.body.innerHTML = '<p class="empty">Программа выключена. Окно можно закрыть.</p>';
+});
+
+async function checkUpdate() {
+  let u;
+  try { u = await (await fetch("/api/update/check")).json(); } catch (e) { return; }
+  if (!u.available) return;
+  const btn = $("updateBtn");
+  btn.style.display = "";
+  btn.title = u.notes || "";
+  btn.textContent = `Обновить до версии ${u.latest}`;
+  btn.onclick = async () => {
+    if (!u.can_install) { window.open(u.download || "https://github.com/Omajati/youtube-niche-finder", "_blank"); return; }
+    btn.disabled = true;
+    const res = await fetch("/api/update/apply", { method: "POST", body: "{}" });
+    if (!res.ok) { btn.disabled = false; return showStatus((await res.json()).error, true); }
+    const tick = async () => {
+      let st;
+      try { st = await (await fetch("/api/update/status")).json(); } catch (e) { btn.textContent = "Перезапускаю…"; return; }
+      if (st.status === "error") { btn.disabled = false; btn.textContent = "Обновить"; return showStatus(st.error, true); }
+      btn.textContent = st.step ? st.step[0].toUpperCase() + st.step.slice(1) + "…" : "Обновляю…";
+      setTimeout(tick, 1000);
+    };
+    tick();
+  };
+}
+
+loadConfig().then(() => {
+  $("ver").textContent = cfg.version ? `версия ${cfg.version}` : "";
+  if (!cfg.keys_configured) openSettings();
+}).then(loadResults).then(poll).then(checkUpdate);
+</script>
+</body>
+</html>
