@@ -66,6 +66,15 @@ class ScoringTest(unittest.TestCase):
         r = analyze("q", "fr", [hindi, script, ok], chs, now=NOW)
         self.assertEqual((r["videos_long"], r["skipped_lang"]), (1, 2))
 
+    def test_low_view_videos_are_not_hits(self):
+        # у крошечных каналов ratio огромный, но до 10K просмотров не дотягивает никто
+        chs = [channel(f"c{i}", 100, 500) for i in range(10)]
+        vids = [video(f"v{i}", f"c{i}", 3_000) for i in range(10)]
+        r = analyze("q", "en", vids, chs, now=NOW)
+        self.assertEqual(r["scores"]["outlier"], 0)
+        self.assertEqual(r["top_videos"], [])
+        self.assertTrue(r["low_data"])
+
     def test_empty(self):
         self.assertEqual(analyze("q", "en", [], [], now=NOW)["score"], 0)
 

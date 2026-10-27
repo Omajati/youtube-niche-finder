@@ -37,7 +37,8 @@ MIN_DURATION_SEC = _int("MIN_DURATION_MIN", 8) * 60   # длинные роли�
 SMALL_CHANNEL_MAX_SUBS = _int("SMALL_CHANNEL_MAX_SUBS", 200_000)
 BIG_CHANNEL_SUBS = _int("BIG_CHANNEL_SUBS", 1_000_000)
 NEW_CHANNEL_DAYS = _int("NEW_CHANNEL_DAYS", 90)       # «новый канал» = создан за 3 месяца
-NEW_CHANNEL_MIN_VIEWS = _int("NEW_CHANNEL_MIN_VIEWS", 10_000)
+MIN_VIEWS = _int("MIN_VIEWS", 10_000)                # ролик с меньшим числом просмотров успехом не считается
+NEW_CHANNEL_MIN_VIEWS = _int("NEW_CHANNEL_MIN_VIEWS", MIN_VIEWS)
 SEARCH_PUBLISHED_DAYS = _int("SEARCH_PUBLISHED_DAYS", 180)  # ищем видео за последние N дней
 # Отдельный поиск на каждую длительность: medium = 4–20 мин, long = больше 20 мин.
 # Без фильтра выдача забита шортсами, а каждый поиск стоит 100 единиц квоты.

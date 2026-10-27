@@ -122,9 +122,16 @@ def analyze(query, lang, videos_raw, channels_raw, now=None):
     small = [v for v in videos if v["subs"] <= config.SMALL_CHANNEL_MAX_SUBS]
     big_channels = [c for c in used_channels if c["subs"] >= config.BIG_CHANNEL_SUBS]
 
-    # 1. Аутлайер-фактор: ratio 0.3 -> 0, ratio 10 -> 1 (логарифмическая шкала)
-    median_ratio = median(v["ratio"] for v in small) if small else 0
-    s_outlier = _clamp((math.log10(median_ratio) + 0.5) / 1.5) if median_ratio > 0 else 0
+    # Ролики малых каналов, набравшие от MIN_VIEWS просмотров. Всё, что ниже, успехом не считаем:
+    # 3K просмотров на канале со 100 подписчиками даёт 30×, но спроса не доказывает.
+    hits = [v for v in small if v["views"] >= config.MIN_VIEWS]
+    hit_share = len(hits) / len(small) if small else 0
+
+    # 1. Аутлайер-фактор: медиана ratio у таких роликов (0.3 -> 0, 10 -> 1, логарифмическая шкала)
+    #    и какая доля роликов малых каналов вообще дотягивает до MIN_VIEWS (половина и больше -> 1)
+    median_ratio = median(v["ratio"] for v in hits) if hits else 0
+    s_ratio = _clamp((math.log10(median_ratio) + 0.5) / 1.5) if median_ratio > 0 else 0
+    s_outlier = 0.7 * s_ratio + 0.3 * _clamp(hit_share / 0.5)
 
     # 2. Новые каналы: созданы за последние NEW_CHANNEL_DAYS дней
     new_channels = [c for c in used_channels if c["age_days"] <= config.NEW_CHANNEL_DAYS]
@@ -142,11 +149,11 @@ def analyze(query, lang, videos_raw, channels_raw, now=None):
     #    и сколько малых каналов имеют ролики с ratio >= 1
     total_views = sum(v["views"] for v in videos) or 1
     top_share = max(v["views"] for v in videos) / total_views
-    strong_small_channels = {v["channel_id"] for v in small if v["ratio"] >= 1}
+    strong_small_channels = {v["channel_id"] for v in hits if v["ratio"] >= 1}
     s_stability = 0.5 * (1 - top_share) + 0.5 * _clamp(len(strong_small_channels) / 5)
 
     # 5. Формат: длина успешных роликов и частота загрузок их каналов
-    successful = [v for v in small if v["ratio"] >= 1] or small or videos
+    successful = [v for v in hits if v["ratio"] >= 1] or hits or small or videos
     avg_len = mean(v["duration_min"] for v in successful)
     succ_channels = [channels[c] for c in {v["channel_id"] for v in successful}]
     uploads_week = median(c["uploads_per_week"] for c in succ_channels)
@@ -164,7 +171,7 @@ def analyze(query, lang, videos_raw, channels_raw, now=None):
     total = sum(scores[k] * w for k, w in WEIGHTS.items())
 
     tag_counter = Counter()
-    for v in successful:
+    for v in ([v for v in hits if v["ratio"] >= 1] or hits):
         for t in {t.lower().strip() for t in v["tags"]}:
             if t and t != query.lower() and t not in STOP_TAGS and len(t) > 3:
                 tag_counter[t] += 1
@@ -172,11 +179,13 @@ def analyze(query, lang, videos_raw, channels_raw, now=None):
     result.update(
         score=round(total),
         scores={k: round(v * 100) for k, v in scores.items()},
-        low_data=len(videos) < 10 or len(small) < 5,
+        low_data=len(videos) < 10 or len(small) < 5 or len(hits) < 3,
         metrics={
             "median_ratio_small": round(median_ratio, 2),
             "median_views": int(median(v["views"] for v in videos)),
             "median_views_small": int(median(v["views"] for v in small)) if small else 0,
+            "hits_small": len(hits),
+            "hit_share_small": round(hit_share * 100),
             "channels": len(used_channels),
             "small_channels": len({v["channel_id"] for v in small}),
             "big_channels": len(big_channels),
@@ -189,7 +198,7 @@ def analyze(query, lang, videos_raw, channels_raw, now=None):
             "top_video_share": round(top_share * 100),
         },
         top_videos=[{k: v[k] for k in ("id", "title", "channel", "subs", "views", "ratio", "duration_min", "published")}
-                    for v in sorted(small or videos, key=lambda x: x["ratio"], reverse=True)[:8]],
+                    for v in sorted(hits, key=lambda x: x["ratio"], reverse=True)[:8]],
         channels=sorted(
             [{**c, "best_views": best_views[c["id"]], "is_new": c["age_days"] <= config.NEW_CHANNEL_DAYS}
              for c in used_channels],

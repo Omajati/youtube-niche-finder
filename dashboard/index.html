@@ -136,7 +136,7 @@ a { color: var(--accent); }
           <th data-sort="lang">Язык</th>
           <th title="Аутлайер · Новые · Конкуренция · Стабильность · Формат">Критерии</th>
           <th data-sort="m.median_ratio_small" title="Медиана просмотры/подписчики у малых каналов">Просм./подп.</th>
-          <th data-sort="m.median_views_small">Медиана просм.</th>
+          <th data-sort="m.hits_small" title="Ролики малых каналов от 10K просмотров">Ролики 10K+</th>
           <th data-sort="m.new_successful" title="Новые каналы (≤3 мес.) с хорошими просмотрами / всего новых">Новые</th>
           <th data-sort="m.big_share">Миллионники</th>
           <th data-sort="m.avg_length_successful_min">Длина</th>
@@ -255,7 +255,7 @@ function render() {
       <td><span class="lang">${r.lang}</span></td>
       <td><div class="bars">${bars}</div></td>
       <td>${m.median_ratio_small ?? "–"}×</td>
-      <td>${fmt(m.median_views_small)}</td>
+      <td>${m.hits_small ?? "–"}</td>
       <td>${m.new_successful ?? 0} / ${m.new_channels ?? 0}</td>
       <td>${m.big_share ?? 0}%</td>
       <td>${m.avg_length_successful_min ?? "–"} мин</td>
@@ -280,8 +280,8 @@ function detail(r) {
   const related = (r.related || []).map(t => `<button class="chip" data-tag="${esc(t)}">${esc(t)}</button>`).join("");
   return `<tr class="detail"><td colspan="9">
     <div class="dgrid">
-      ${metric(m.median_ratio_small + "×", "медиана просм./подп. (малые каналы)")}
-      ${metric(fmt(m.median_views_small), "медиана просмотров у малых каналов")}
+      ${metric(m.median_ratio_small + "×", "медиана просм./подп. у роликов от 10K")}
+      ${metric(`${m.hits_small ?? 0} (${m.hit_share_small ?? 0}%)`, "роликов малых каналов от 10K просм.")}
       ${metric(`${m.new_successful} из ${m.new_channels}`, "новых каналов с ≥10K просм.")}
       ${metric(`${m.big_channels} из ${m.channels}`, "каналов-миллионников")}
       ${metric(m.avg_length_successful_min + " мин", "средняя длина успешных роликов")}
@@ -290,7 +290,7 @@ function detail(r) {
       ${metric(`${r.videos_long} из ${r.videos_found}`, "роликов от 8 мин в выдаче")}
     </div>
     ${crit}
-    <h3>Лучшие ролики малых каналов</h3><div class="videos">${videos || '<span class="hint">нет</span>'}</div>
+    <h3>Лучшие ролики малых каналов (от 10K просмотров)</h3><div class="videos">${videos || '<span class="hint">нет роликов от 10K</span>'}</div>
     <h3>Каналы</h3><div class="table-wrap"><table class="ch-table"><thead><tr><th>Канал</th><th>Подписчики</th><th>Лучший ролик</th><th>Видео</th><th>В неделю</th><th>Создан</th></tr></thead><tbody>${channels}</tbody></table></div>
     <h3>Похожие подниши (теги успешных роликов, нажмите чтобы добавить)</h3><div class="chips">${related || '<span class="hint">нет тегов</span>'}</div>
     <div class="actions"><button class="ghost" data-del="${esc(key(r))}">Удалить из списка</button>
