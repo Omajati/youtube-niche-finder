@@ -262,7 +262,7 @@ class UpdaterTest(unittest.TestCase):
     def test_check_reports_newer_version(self):
         from niche_finder import updater
         orig = updater._latest
-        updater._latest = lambda: {"version": updater.current() + 1, "notes": "x"}
+        updater._latest = lambda fresh=False: {"version": updater.current() + 1, "notes": "x"}
         try:
             self.assertTrue(updater.check()["available"])
         finally:

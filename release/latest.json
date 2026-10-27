@@ -1,5 +1,5 @@
 {
- "version": 5,
- "notes": "Автопоиск ниш по каталогу вечнозелёных тем, хранилище ниш, оценка вечнозелёности и насыщенности, перевод темы на языки рынков",
+ "version": 6,
+ "notes": "Кнопка «Проверить обновления» слева сверху",
  "app_zip": "https://raw.githubusercontent.com/Omajati/youtube-niche-finder/main/release/NicheFinder.zip"
 }

@@ -102,8 +102,8 @@ class Handler(BaseHTTPRequestHandler):
                     "search_published_days": config.SEARCH_PUBLISHED_DAYS,
                 },
             })
-        elif self.path == "/api/update/check":
-            self._json(updater.check())
+        elif self.path.split("?")[0] == "/api/update/check":
+            self._json(updater.check(fresh="fresh=1" in self.path))
         elif self.path == "/api/update/status":
             self._json(updater.state)
         else:

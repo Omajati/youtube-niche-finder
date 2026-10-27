@@ -53,16 +53,18 @@ def can_install():
     return sys.platform == "darwin" and (ROOT / ".venv").exists()
 
 
-def _latest():
+def _latest(fresh=False):
+    # GitHub кэширует файл на несколько минут; ручная проверка просит самую свежую копию
+    stamp = int(time.time()) if fresh else int(time.time() // 300)
     try:
-        return json.loads(_get(f"{LATEST}?t={int(time.time() // 300)}", timeout=15))
+        return json.loads(_get(f"{LATEST}?t={stamp}", timeout=15))
     except Exception:
         return json.loads(_get(LATEST_API, timeout=20, headers={"Accept": "application/vnd.github.raw"}))
 
 
-def check():
+def check(fresh=False):
     try:
-        r = _latest()
+        r = _latest(fresh)
     except Exception as e:
         return {"current": current(), "latest": 0, "available": False, "error": f"GitHub недоступен: {e}"}
     latest = int(r.get("version") or 0)
