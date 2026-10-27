@@ -94,6 +94,22 @@ h3 { font-size: 13px; margin: 16px 0 8px; color: var(--muted); text-transform: u
 .new { color: var(--good); font-weight: 600; }
 .empty { color: var(--muted); padding: 30px 0; text-align: center; }
 a { color: var(--accent); }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin: 0 0 12px; }
+.tabs button { background: transparent; color: var(--muted); border-radius: 6px 6px 0 0; padding: 8px 12px; font-weight: 600; }
+.tabs button.on { color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
+.pane { display: none; } .pane.on { display: block; }
+.scout { font-size: 11px; color: var(--muted); border: 1px dashed var(--line); border-radius: 4px; padding: 0 5px; margin-left: 6px; font-weight: 500; }
+.best { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-bottom: 16px; }
+.best .card { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; cursor: pointer; background: var(--bg); }
+.best .card:hover { border-color: var(--accent); }
+.best .card b { display: block; margin: 6px 0 2px; }
+.best .card .sub { display: block; color: var(--muted); font-size: 12px; }
+.vault-item { border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 10px; display: grid; gap: 8px; }
+.vault-item .head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.vault-item .head b { font-size: 15px; }
+.vault-item textarea { min-height: 50px; }
+.vault-item .facts { color: var(--muted); font-size: 12px; }
+.inline-check { display: inline-flex !important; gap: 6px; align-items: center; font-weight: 400 !important; margin: 10px 0 0 !important; }
 </style>
 </head>
 <body>
@@ -128,12 +144,25 @@ a { color: var(--accent); }
 </div>
 <main>
   <section class="panel">
-    <h2>Новый анализ</h2>
-    <label for="queries">Темы (по одной в строке, на языке рынка)</label>
-    <textarea id="queries" placeholder="unsolved mysteries&#10;strange true stories"></textarea>
-    <div class="hint">Пусто: возьмём стартовые темы для каждого языка.</div>
+    <div class="tabs" id="modeTabs">
+      <button data-mode="auto" class="on">Автопоиск</button>
+      <button data-mode="manual">По запросу</button>
+    </div>
     <label>Языки</label>
     <div class="langs" id="langs"></div>
+    <div class="pane on" id="pane-auto">
+      <p class="hint">Машина сама перебирает вечнозелёные темы из каталога. Сначала делает быструю разведку многих тем, потом полный анализ лучших, а подниши лучших откладывает на следующий запуск. С каждым запуском она уходит глубже.</p>
+      <label for="budget">Бюджет квоты на запуск, единиц</label>
+      <input type="number" id="budget" min="500" max="40000" step="500" value="3000">
+      <div class="hint" id="autoEstimate"></div>
+      <div class="actions"><button id="runAuto">Запустить автопоиск</button></div>
+      <div class="hint" id="autoInfo"></div>
+    </div>
+    <div class="pane" id="pane-manual">
+    <label for="queries">Темы (по одной в строке)</label>
+    <textarea id="queries" placeholder="unsolved mysteries&#10;strange true stories"></textarea>
+    <label class="inline-check"><input type="checkbox" id="translate" checked> перевести тему на выбранные языки</label>
+    <div class="hint">Можно писать по-русски, тема переведётся на язык каждого рынка. Пусто: возьмём стартовые темы.</div>
     <div class="row">
       <div>
         <label for="expand">Подсказок YouTube на тему</label>
@@ -149,13 +178,22 @@ a { color: var(--accent); }
       <button id="run">Запустить анализ</button>
       <button class="ghost" id="seeds">Показать стартовые темы</button>
     </div>
+    </div>
     <div class="status" id="status"></div>
     <div class="quota" id="quota"></div>
   </section>
 
   <section class="panel">
+    <div class="tabs" id="viewTabs">
+      <button data-view="all" class="on">Все ниши</button>
+      <button data-view="vault">Хранилище</button>
+    </div>
+    <div class="pane on" id="view-all">
+    <h2 id="bestTitle" style="display:none">Лучшие ниши для канала</h2>
+    <div class="best" id="best"></div>
     <div class="toolbar">
       <select id="filterLang"><option value="">Все языки</option></select>
+      <select id="filterDepth"><option value="">Любой анализ</option><option value="full">Только полный анализ</option><option value="scout">Только разведка</option></select>
       <label style="margin:0;font-weight:400;display:inline-flex;gap:6px;align-items:center">
         <input type="checkbox" id="hideLow"> скрыть «мало данных»
       </label>
@@ -167,7 +205,8 @@ a { color: var(--accent); }
           <th data-sort="score">Балл</th>
           <th data-sort="query">Ниша</th>
           <th data-sort="lang">Язык</th>
-          <th title="Аутлайер · Новые · Конкуренция · Стабильность · Формат">Критерии</th>
+          <th title="Просмотры ≫ подписчики · Новые · Конкуренция · Вечнозелёность · Стабильность · Формат">Критерии</th>
+          <th data-sort="scores.evergreen" title="Старые ролики продолжают набирать, тема не новостная">Вечнозел.</th>
           <th data-sort="m.median_ratio_small" title="Медиана просмотры/подписчики у малых каналов">Просм./подп.</th>
           <th data-sort="m.hits_small" title="Ролики малых каналов, набравшие порог просмотров (EN 10K, остальные 5K)">Ролики с порогом</th>
           <th data-sort="m.new_successful" title="Новые каналы (≤3 мес.) с хорошими просмотрами / всего новых">Новые</th>
@@ -177,18 +216,29 @@ a { color: var(--accent); }
         <tbody id="rows"></tbody>
       </table>
     </div>
-    <div class="empty" id="empty">Пока нет результатов. Запустите анализ слева.</div>
+    <div class="empty" id="empty">Пока нет результатов. Запустите автопоиск слева.</div>
+    </div>
+    <div class="pane" id="view-vault">
+      <p class="hint" id="vaultHint"></p>
+      <div class="toolbar">
+        <select id="vaultStatus"><option value="">Все статусы</option></select>
+        <span class="count" id="vaultCount"></span>
+      </div>
+      <div id="vaultList"></div>
+    </div>
   </section>
 </main>
 
 <script>
 const CRIT = [
-  ["outlier", "Просмотры ≫ подписчики", 35],
-  ["new_channels", "Новые каналы растут", 25],
-  ["competition", "Мало миллионников", 20],
+  ["outlier", "Просмотры ≫ подписчики", 30],
+  ["new_channels", "Новые каналы растут", 20],
+  ["competition", "Низкая конкуренция", 15],
+  ["evergreen", "Вечнозелёная тема", 15],
   ["stability", "Стабильный спрос", 10],
   ["format", "Формат и нагрузка", 10],
 ];
+let vault = { items: [], statuses: [] };
 let cfg = null, results = [], sortKey = "score", sortDir = -1, openKey = null, polling = null;
 
 const $ = id => document.getElementById(id);
@@ -207,6 +257,7 @@ async function loadConfig() {
     Object.entries(cfg.languages).map(([c, n]) => `<option value="${c}">${n}</option>`).join("");
   renderQuota(cfg.quota);
   updateEstimate();
+  updateAutoEstimate();
 }
 
 function renderQuota(q) {
@@ -231,15 +282,108 @@ function updateEstimate() {
   $("estimate").textContent = `До ${n} ниш ≈ ${units.toLocaleString("ru")} единиц квоты (у одного ключа 10 000 в день). Повторный анализ в течение 3 дней берётся из кэша бесплатно.`;
 }
 
-async function run() {
-  const body = { queries: queries(), langs: selectedLangs(), expand: +$("expand").value, max_niches: +$("max").value };
+function run() {
+  return startRun({ mode: "manual", queries: queries(), langs: selectedLangs(), expand: +$("expand").value,
+                    max_niches: +$("max").value, translate: $("translate").checked });
+}
+function runAuto() {
+  return startRun({ mode: "auto", langs: selectedLangs(), budget: +$("budget").value });
+}
+async function startRun(body) {
   if (!body.langs.length) return showStatus("Выберите хотя бы один язык", true);
   const res = await fetch("/api/run", { method: "POST", body: JSON.stringify(body) });
   const data = await res.json();
   if (!res.ok) return showStatus(data.error, true);
-  $("run").disabled = true;
+  $("run").disabled = $("runAuto").disabled = true;
   poll();
 }
+
+function updateAutoEstimate() {
+  if (!cfg || !cfg.auto) return;
+  const a = cfg.auto, b = +$("budget").value || 3000;
+  const scout = Math.floor(b * 0.6 / a.units_scout), deep = Math.floor((b - scout * a.units_scout) / a.units_deep);
+  $("autoEstimate").textContent = `≈ ${scout} тем на разведку и ${deep} на полный анализ. У одного ключа 10 000 единиц в день.`;
+  $("autoInfo").textContent = a.runs
+    ? `Запусков: ${a.runs}. Проверено тем: ${a.explored}. В очереди подниш: ${a.queue}. Категорий в каталоге: ${a.categories}.`
+    : `Категорий в каталоге: ${a.categories}: загадки, древние цивилизации, космос, психология, изобретения, катастрофы и другие.`;
+}
+
+const catName = r => (r.category && cfg.auto && cfg.auto.category_names[r.category]) || "";
+function renderBest() {
+  const best = results.filter(r => (r.depth || "full") === "full" && !r.low_data)
+    .sort((a, b) => b.score - a.score).slice(0, 6);
+  $("bestTitle").style.display = best.length ? "" : "none";
+  $("best").innerHTML = best.map(r => `<div class="card" data-open="${esc(key(r))}">
+    <span class="score" style="background:${color(r.score)}">${r.score}</span> <span class="lang">${r.lang}</span>
+    <b>${esc(r.query)}</b>
+    <span class="sub">${esc(catName(r))}${catName(r) ? " · " : ""}вечнозелёность ${sc(r, "evergreen")} · ${r.metrics.median_ratio_small}× · новых ${r.metrics.new_successful}</span></div>`).join("");
+}
+$("best").addEventListener("click", e => {
+  const c = e.target.closest("[data-open]");
+  if (!c) return;
+  openKey = c.dataset.open;
+  $("filterLang").value = ""; $("filterDepth").value = ""; $("hideLow").checked = false;
+  render();
+  document.querySelector(`tr.item[data-key="${CSS.escape(openKey)}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+});
+
+// --- хранилище ---
+const vkey = r => r.lang + "|" + r.query.toLowerCase().trim();
+async function loadVault() {
+  vault = await (await fetch("/api/vault")).json();
+  const sel = $("vaultStatus"), cur = sel.value;
+  sel.innerHTML = `<option value="">Все статусы</option>` + vault.statuses.map(s => `<option>${esc(s)}</option>`).join("");
+  sel.value = cur;
+  $("vaultHint").textContent = `Сюда сами попадают ниши с полным анализом и баллом от ${vault.min_score}. Добавить любую можно кнопкой «★ В хранилище» в её карточке.`;
+  document.querySelector('#viewTabs [data-view="vault"]').textContent = `Хранилище (${vault.items.length})`;
+  renderVault();
+}
+function renderVault() {
+  const st = $("vaultStatus").value;
+  const items = vault.items.filter(v => !st || v.status === st).sort((a, b) => b.score - a.score);
+  $("vaultCount").textContent = vault.items.length ? `${items.length} из ${vault.items.length}` : "";
+  $("vaultList").innerHTML = items.length ? items.map(v => {
+    const m = v.metrics || {}, s = v.scores || {};
+    const vids = (v.top_videos || []).map(x => `<a href="https://www.youtube.com/watch?v=${esc(x.id)}" target="_blank" rel="noopener">${esc(x.title)}</a> (${fmt(x.views)}, ${x.ratio}×)`).join("<br>");
+    return `<div class="vault-item" data-vkey="${esc(v.key)}">
+      <div class="head"><span class="score" style="background:${color(v.score)}">${v.score}</span><span class="lang">${v.lang}</span>
+        <b>${esc(v.query)}</b>${v.category && cfg.auto ? `<span class="hint" style="margin:0">${esc(cfg.auto.category_names[v.category] || "")}</span>` : ""}
+        <select data-vstatus style="width:auto;margin-left:auto">${vault.statuses.map(x => `<option ${x === v.status ? "selected" : ""}>${esc(x)}</option>`).join("")}</select>
+        <button class="ghost" data-vremove>Убрать</button></div>
+      <div class="facts">Вечнозелёность ${s.evergreen ?? "–"} · просм./подп. ${m.median_ratio_small ?? "–"}× · новых каналов с просмотрами ${m.new_successful ?? 0} · миллионников ${m.big_share ?? 0}% · длина ${m.avg_length_successful_min ?? "–"} мин · ${v.added_by === "auto" ? "добавлено автоматически" : "добавлено вручную"} ${v.added_at.slice(0, 10)}</div>
+      ${vids ? `<div class="facts">${vids}</div>` : ""}
+      <textarea data-vnote placeholder="Заметки: идеи роликов, формат, чем отличаться от конкурентов">${esc(v.note)}</textarea>
+    </div>`;
+  }).join("") : '<p class="empty">Пока пусто. Запустите автопоиск: подходящие ниши появятся здесь сами.</p>';
+}
+$("vaultStatus").addEventListener("change", renderVault);
+$("vaultList").addEventListener("change", async e => {
+  const item = e.target.closest("[data-vkey]");
+  if (!item) return;
+  const k = item.dataset.vkey;
+  if (e.target.matches("[data-vstatus]")) await fetch("/api/vault/update", { method: "POST", body: JSON.stringify({ key: k, status: e.target.value }) });
+  if (e.target.matches("[data-vnote]")) await fetch("/api/vault/update", { method: "POST", body: JSON.stringify({ key: k, note: e.target.value }) });
+  const v = vault.items.find(x => x.key === k);
+  if (v) { if (e.target.matches("[data-vstatus]")) v.status = e.target.value; else v.note = e.target.value; }
+});
+$("vaultList").addEventListener("click", async e => {
+  if (!e.target.matches("[data-vremove]")) return;
+  const k = e.target.closest("[data-vkey]").dataset.vkey;
+  if (!confirm("Убрать нишу из хранилища?")) return;
+  await fetch("/api/vault/remove", { method: "POST", body: JSON.stringify({ key: k }) });
+  await loadVault(); render();
+});
+
+function tabs(id, attr, prefix) {
+  $(id).addEventListener("click", e => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    $(id).querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b));
+    document.querySelectorAll(`[id^="${prefix}"]`).forEach(p => p.classList.toggle("on", p.id === prefix + b.dataset[attr]));
+  });
+}
+tabs("modeTabs", "mode", "pane-");
+tabs("viewTabs", "view", "view-");
 
 function showStatus(text, err) {
   const el = $("status");
@@ -252,19 +396,22 @@ async function poll() {
   clearTimeout(polling);
   const s = await (await fetch("/api/status")).json();
   if (s.state === "running") {
-    showStatus(`Анализ: ${s.done}/${s.total || "?"}${s.current ? ` · сейчас <b>${esc(s.current)}</b>` : ""} · потрачено ${s.units || 0} ед.`);
+    showStatus(`${s.mode === "auto" ? `Автопоиск, ${s.phase || ""}` : "Анализ"}: ${s.done}/${s.total || "?"}${s.current ? ` · сейчас <b>${esc(s.current)}</b>` : ""} · потрачено ${s.units || 0} ед.`);
     await loadResults();
     polling = setTimeout(poll, 1500);
     return;
   }
-  $("run").disabled = false;
+  $("run").disabled = $("runAuto").disabled = false;
   if (s.state === "idle") return;
   const errs = (s.errors || []).map(e => "<br>" + esc(e)).join("");
   const label = { finished: "Готово", quota_exhausted: "Квота закончилась на всех ключах", error: "Ошибка" }[s.state] || s.state;
-  showStatus(`${label}: проанализировано ${s.done || 0} ниш, потрачено ${s.units || 0} ед.${errs}`, s.state !== "finished");
+  showStatus(`${label}: проанализировано ${s.done || 0} ниш, потрачено ${s.units || 0} ед.${s.mode === "auto" ? `. В очереди на следующий запуск: ${s.queue ?? 0} подниш` : ""}${errs}`, s.state !== "finished");
+  await loadVault();
   await loadResults();
-  cfg.quota = (await (await fetch("/api/config")).json()).quota;
+  const fresh = await (await fetch("/api/config")).json();
+  cfg.quota = fresh.quota; cfg.auto = fresh.auto;
   renderQuota(cfg.quota);
+  updateAutoEstimate();
 }
 
 async function loadResults() {
@@ -272,22 +419,31 @@ async function loadResults() {
   render();
 }
 
-function val(r, k) { return k.startsWith("m.") ? (r.metrics || {})[k.slice(2)] ?? 0 : r[k]; }
+function val(r, k) {
+  if (k.startsWith("m.")) return (r.metrics || {})[k.slice(2)] ?? 0;
+  if (k.startsWith("scores.")) return (r.scores || {})[k.slice(7)] ?? 0;
+  return r[k];
+}
+const sc = (r, k) => (r.scores || {})[k] ?? 0;
 
 function render() {
-  const lang = $("filterLang").value, hideLow = $("hideLow").checked;
-  const rows = results.filter(r => (!lang || r.lang === lang) && (!hideLow || !r.low_data))
+  const lang = $("filterLang").value, hideLow = $("hideLow").checked, depth = $("filterDepth").value;
+  renderBest();
+  const rows = results.filter(r => (!lang || r.lang === lang) && (!hideLow || !r.low_data)
+    && (!depth || (r.depth || "full") === depth))
     .sort((a, b) => { const x = val(a, sortKey), y = val(b, sortKey); return (x > y ? 1 : x < y ? -1 : 0) * sortDir; });
   $("empty").style.display = rows.length ? "none" : "block";
   $("count").textContent = results.length ? `${rows.length} из ${results.length}` : "";
   $("rows").innerHTML = rows.map(r => {
     const m = r.metrics || {};
-    const bars = CRIT.map(([k, n]) => `<i title="${n}: ${r.scores[k]}"><span style="height:${Math.max(r.scores[k], 4)}%"></span></i>`).join("");
+    const bars = CRIT.map(([k, n]) => `<i title="${n}: ${sc(r, k)}"><span style="height:${Math.max(sc(r, k), 4)}%"></span></i>`).join("");
+    const inVault = vault.items.some(v => v.key === vkey(r));
     const main = `<tr class="item" data-key="${esc(key(r))}">
       <td><span class="score" style="background:${color(r.score)}">${r.score}</span></td>
-      <td class="q">${esc(r.query)}${r.low_data ? '<span class="badge">мало данных</span>' : ""}</td>
+      <td class="q">${inVault ? "★ " : ""}${esc(r.query)}${r.depth === "scout" ? '<span class="scout" title="Быстрая оценка по одному поиску. Полный анализ делается для лучших.">разведка</span>' : ""}${r.low_data ? '<span class="badge">мало данных</span>' : ""}${r.category && cfg.auto ? `<div class="hint" style="margin:2px 0 0;font-weight:400">${esc(cfg.auto.category_names[r.category] || "")}</div>` : ""}</td>
       <td><span class="lang">${r.lang}</span></td>
       <td><div class="bars">${bars}</div></td>
+      <td>${sc(r, "evergreen")}</td>
       <td>${m.median_ratio_small ?? "–"}×</td>
       <td>${m.hits_small ?? "–"}</td>
       <td>${m.new_successful ?? 0} / ${m.new_channels ?? 0}</td>
@@ -303,7 +459,8 @@ function detail(r) {
   const mv = fmt(m.min_views || 10000);
   const metric = (v, l) => `<div class="metric"><b>${v}</b><span>${l}</span></div>`;
   const crit = CRIT.map(([k, n, w]) => `<div class="crit"><span>${n} <span style="color:var(--muted)">${w}%</span></span>
-    <div class="track"><div class="fill" style="width:${r.scores[k]}%;background:${color(r.scores[k])}"></div></div><b>${r.scores[k]}</b></div>`).join("");
+    <div class="track"><div class="fill" style="width:${sc(r, k)}%;background:${color(sc(r, k))}"></div></div><b>${sc(r, k)}</b></div>`).join("");
+  const inVault = vault.items.some(v => v.key === vkey(r));
   const videos = (r.top_videos || []).map(v => `<a class="video" href="https://www.youtube.com/watch?v=${esc(v.id)}" target="_blank" rel="noopener">
     <img loading="lazy" src="https://i.ytimg.com/vi/${esc(v.id)}/mqdefault.jpg" alt="">
     <div><div class="t">${esc(v.title)}</div>
@@ -313,7 +470,7 @@ function detail(r) {
     <td><a href="https://www.youtube.com/channel/${esc(c.id)}" target="_blank" rel="noopener">${esc(c.title)}</a>${c.is_new ? ' <span class="new">новый</span>' : ""}</td>
     <td>${fmt(c.subs)}</td><td>${fmt(c.best_views)}</td><td>${c.video_count}</td><td>${c.uploads_per_week}${c.uploads_exact ? "" : "≈"}</td><td>${c.created}</td></tr>`).join("");
   const related = (r.related || []).map(t => `<button class="chip" data-tag="${esc(t)}">${esc(t)}</button>`).join("");
-  return `<tr class="detail"><td colspan="9">
+  return `<tr class="detail"><td colspan="10">
     <div class="dgrid">
       ${metric(m.median_ratio_small + "×", `медиана просм./подп. у роликов от ${mv}`)}
       ${metric(`${m.hits_small ?? 0} (${m.hit_share_small ?? 0}%)`, `роликов малых каналов от ${mv} просм.`)}
@@ -323,12 +480,18 @@ function detail(r) {
       ${metric(m.uploads_per_week_successful + " в нед.", "частота загрузок успешных каналов")}
       ${metric(m.top_video_share + "%", "доля просмотров у топ-ролика")}
       ${metric(`${r.videos_long} из ${r.videos_found}`, "роликов от 8 мин в выдаче")}
+      ${metric(`${m.hits_old_share ?? 0}%`, "успешных роликов старше 2 месяцев")}
+      ${metric(m.search_total ? fmt(m.search_total) : "–", "роликов по теме за полгода (по данным YouTube)")}
     </div>
+    ${r.depth === "scout" ? '<p class="hint">Это быстрая разведка по одному поиску, без проверки частоты загрузок. Нажмите «Полный анализ», чтобы проверить нишу целиком.</p>' : ""}
     ${crit}
     <h3>Лучшие ролики малых каналов (от ${mv} просмотров)</h3><div class="videos">${videos || `<span class="hint">нет роликов от ${mv}</span>`}</div>
     <h3>Каналы</h3><div class="table-wrap"><table class="ch-table"><thead><tr><th>Канал</th><th>Подписчики</th><th>Лучший ролик</th><th>Видео</th><th title="Длинные ролики в неделю за последние 3 месяца">В неделю</th><th>Создан</th></tr></thead><tbody>${channels}</tbody></table></div>
     <h3>Похожие подниши (теги успешных роликов, нажмите чтобы добавить)</h3><div class="chips">${related || '<span class="hint">нет тегов</span>'}</div>
-    <div class="actions"><button class="ghost" data-del="${esc(key(r))}">Удалить из списка</button>
+    <div class="actions">
+      ${inVault ? '<button class="ghost" disabled>★ В хранилище</button>' : `<button data-vadd="${esc(key(r))}">★ В хранилище</button>`}
+      ${r.depth === "scout" ? `<button class="ghost" data-deep="${esc(key(r))}">Полный анализ</button>` : ""}
+      <button class="ghost" data-del="${esc(key(r))}">Удалить из списка</button>
       <span class="hint">Проанализировано ${r.analyzed_at.slice(0, 16).replace("T", " ")}</span></div>
   </td></tr>`;
 }
@@ -343,6 +506,18 @@ $("rows").addEventListener("click", async e => {
     updateEstimate();
     tag.disabled = true;
     return;
+  }
+  const vadd = e.target.closest("[data-vadd]");
+  if (vadd) {
+    const r = results.find(x => key(x) === vadd.dataset.vadd);
+    await fetch("/api/vault/add", { method: "POST", body: JSON.stringify({ query: r.query, lang: r.lang }) });
+    await loadVault();
+    return render();
+  }
+  const deep = e.target.closest("[data-deep]");
+  if (deep) {
+    const r = results.find(x => key(x) === deep.dataset.deep);
+    return startRun({ mode: "manual", queries: [r.query], langs: [r.lang], expand: 0, max_niches: 1, translate: false });
   }
   const del = e.target.closest("[data-del]");
   if (del) {
@@ -362,6 +537,9 @@ document.querySelectorAll("th[data-sort]").forEach(th => th.addEventListener("cl
   render();
 }));
 $("filterLang").addEventListener("change", render);
+$("filterDepth").addEventListener("change", render);
+$("runAuto").addEventListener("click", runAuto);
+$("budget").addEventListener("input", updateAutoEstimate);
 $("hideLow").addEventListener("change", render);
 $("run").addEventListener("click", run);
 $("seeds").addEventListener("click", () => {
@@ -422,7 +600,7 @@ async function checkUpdate() {
 loadConfig().then(() => {
   $("ver").textContent = cfg.version ? `версия ${cfg.version}` : "";
   if (!cfg.keys_configured) openSettings();
-}).then(loadResults).then(poll).then(checkUpdate);
+}).then(loadVault).then(loadResults).then(poll).then(checkUpdate);
 </script>
 </body>
 </html>

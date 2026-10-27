@@ -1,9 +1,10 @@
-"""Оценка ниши 0–100 по пяти критериям.
+"""Оценка ниши 0–100 по шести критериям.
 
 Веса:
-  outlier      35%  медиана «просмотры / подписчики» у видео малых каналов
-  new_channels 25%  каналы младше 3 месяцев, которые уже набирают просмотры
-  competition  20%  чем больше каналов-миллионников в выдаче, тем ниже балл
+  outlier      30%  медиана «просмотры / подписчики» у видео малых каналов
+  new_channels 20%  каналы младше 3 месяцев, которые уже набирают просмотры
+  competition  15%  каналы-миллионники в выдаче и насколько тема забита роликами
+  evergreen    15%  старые ролики продолжают набирать, тема не держится на новостях и трендах
   stability    10%  просмотры распределены по разным каналам и роликам
   format       10%  длинные ролики и посильная частота загрузок
 """
@@ -16,7 +17,13 @@ from statistics import mean, median
 
 from . import config
 
-WEIGHTS = {"outlier": 35, "new_channels": 25, "competition": 20, "stability": 10, "format": 10}
+WEIGHTS = {"outlier": 30, "new_channels": 20, "competition": 15, "evergreen": 15, "stability": 10, "format": 10}
+
+# Признаки трендовой или новостной темы в названиях: такие ролики быстро устаревают
+TREND_WORDS = re.compile(
+    r"\b(20[12]\d|news|breaking|update|trailer|reaction|reacts?|live|today|tonight|this week|election|patch|"
+    r"leaked?|rumou?rs?|noticias|última hora|hoy|en vivo|reacción|nachrichten|aktuell|heute|eilmeldung|"
+    r"actualités?|actu|aujourd'hui|en direct|réaction)\b", re.I)
 
 STOP_TAGS = {"shorts", "short", "video", "youtube", "viral", "trending", "new", "2024", "2025", "2026"}
 
@@ -40,6 +47,25 @@ def _clamp(x):
 
 FOREIGN_WORDS = re.compile(r"\b(hindi|urdu|tamil|telugu|bangla|bengali|marathi|punjabi|kannada|malayalam|"
                            r"tagalog|indonesia|bahasa|türkçe|arabic)\b", re.I)
+# Хинглиш: хинди латиницей. Эти слова не встречаются в английском, испанском, немецком и французском.
+HINGLISH_WORDS = re.compile(r"\b(hai|hain|kya|kaise|kyun|kyu|aur|nahi|kahani|rahasya|itihas|duniya|"
+                            r"bhai|bhaiya|ki kahani|ka sach|ka rahasya)\b", re.I)
+SOUTH_ASIAN_SCRIPTS = ("DEVANAGARI", "BENGALI", "GURMUKHI", "GUJARATI", "ORIYA", "TAMIL", "TELUGU", "KANNADA",
+                       "MALAYALAM", "SINHALA", "ARABIC")
+
+
+def _south_asian(text):
+    return any(unicodedata.name(ch, "").startswith(SOUTH_ASIAN_SCRIPTS) for ch in text if ch.isalpha())
+
+
+def is_excluded_channel(country):
+    return (country or "").upper() in config.EXCLUDE_COUNTRIES
+
+
+def _south_asian_video(snippet, channel_title):
+    """Индийские и соседние каналы не смотрим совсем, даже если ролик на английском."""
+    text = " ".join([snippet.get("title", ""), channel_title, snippet.get("description", "")[:500]])
+    return _south_asian(text) or bool(HINGLISH_WORDS.search(snippet.get("title", "") + " " + channel_title))
 
 
 def _non_latin(text):
@@ -71,7 +97,7 @@ def _activity(dates, now, created_days):
     return per_week, first, len(recent)
 
 
-def analyze(query, lang, videos_raw, channels_raw, now=None, uploads=None):
+def analyze(query, lang, videos_raw, channels_raw, now=None, uploads=None, search_total=None):
     now = now or datetime.now(timezone.utc)
     uploads = uploads or {}
     min_views = config.MIN_VIEWS.get(lang, config.MIN_VIEWS["en"])
@@ -84,6 +110,7 @@ def analyze(query, lang, videos_raw, channels_raw, now=None, uploads=None):
         channels[c["id"]] = {
             "id": c["id"],
             "title": c["snippet"]["title"],
+            "country": c["snippet"].get("country", ""),
             "subs": None if st.get("hiddenSubscriberCount") else int(st.get("subscriberCount", 0)),
             "views": int(st.get("viewCount", 0)),
             "video_count": video_count,
@@ -103,7 +130,7 @@ def analyze(query, lang, videos_raw, channels_raw, now=None, uploads=None):
                 ch["active_days"] = min(first_days, age_days)
 
     videos = []
-    skipped_short = skipped_lang = 0
+    skipped_short = skipped_lang = skipped_region = 0
     for v in videos_raw:
         sn = v["snippet"]
         duration = parse_duration(v.get("contentDetails", {}).get("duration"))
@@ -111,6 +138,9 @@ def analyze(query, lang, videos_raw, channels_raw, now=None, uploads=None):
             skipped_short += 1
             continue
         ch = channels.get(sn["channelId"])
+        if ch and (is_excluded_channel(ch["country"]) or _south_asian_video(sn, ch["title"])):
+            skipped_region += 1
+            continue
         if not _video_lang_ok(sn, lang, ch["title"] if ch else ""):
             skipped_lang += 1
             continue
@@ -141,6 +171,7 @@ def analyze(query, lang, videos_raw, channels_raw, now=None, uploads=None):
         "videos_long": len(videos),
         "skipped_short": skipped_short,
         "skipped_lang": skipped_lang,
+        "skipped_region": skipped_region,
     }
     if not videos:
         result.update(score=0, scores={k: 0 for k in WEIGHTS}, low_data=True, metrics={},
@@ -174,9 +205,21 @@ def analyze(query, lang, videos_raw, channels_raw, now=None, uploads=None):
     new_successful = [c for c in new_channels if best_views[c["id"]] >= min_views]
     s_new = _clamp(len(new_successful) / 3) * 0.8 + _clamp(len(new_channels) / 5) * 0.2
 
-    # 3. Конкуренция: доля каналов-миллионников; 40% и больше -> 0
+    # 3. Конкуренция: доля каналов-миллионников (40% и больше -> 0) и насыщенность темы:
+    #    сколько роликов по запросу нашёл YouTube за полгода (до 2 тыс. -> 1, от 200 тыс. -> 0)
     big_share = len(big_channels) / len(used_channels)
-    s_competition = 1 - _clamp(big_share / 0.4)
+    s_big = 1 - _clamp(big_share / 0.4)
+    if search_total:
+        s_saturation = 1 - _clamp((math.log10(max(search_total, 1)) - math.log10(2_000)) / 2)
+        s_competition = 0.7 * s_big + 0.3 * s_saturation
+    else:
+        s_competition = s_big
+
+    # Вечнозелёность: какая доля успешных роликов старше 2 месяцев (половина и больше -> 1)
+    # и сколько из них не похожи на новости и тренды
+    hits_old = [v for v in hits if v["age_days"] >= 60]
+    trendy = [v for v in hits if TREND_WORDS.search(v["title"])]
+    s_evergreen = (0.6 * _clamp((len(hits_old) / len(hits)) / 0.5) + 0.4 * (1 - len(trendy) / len(hits))) if hits else 0
 
     # 4. Стабильность: доля самого популярного ролика в сумме просмотров
     #    и сколько малых каналов имеют ролики с ratio >= 1
@@ -198,6 +241,7 @@ def analyze(query, lang, videos_raw, channels_raw, now=None, uploads=None):
         "outlier": s_outlier,
         "new_channels": s_new,
         "competition": s_competition,
+        "evergreen": s_evergreen,
         "stability": s_stability,
         "format": s_format,
     }
@@ -231,6 +275,9 @@ def analyze(query, lang, videos_raw, channels_raw, now=None, uploads=None):
             "avg_length_successful_min": round(avg_len, 1),
             "uploads_per_week_successful": round(uploads_week, 2),
             "top_video_share": round(top_share * 100),
+            "search_total": search_total or 0,
+            "hits_old_share": round(len(hits_old) / len(hits) * 100) if hits else 0,
+            "trendy_share": round(len(trendy) / len(hits) * 100) if hits else 0,
         },
         top_videos=[{k: v[k] for k in ("id", "title", "channel", "subs", "views", "ratio", "duration_min", "published",
                                           "views_per_day")}

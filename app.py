@@ -26,6 +26,9 @@ def start_run(body):
     queries = [q.strip() for q in body.get("queries", []) if q.strip()]
     expand = max(0, min(int(body.get("expand", 0)), 10))
     max_niches = max(1, min(int(body.get("max_niches", 10)), 50))
+    translate = bool(body.get("translate"))
+    auto = body.get("mode") == "auto"
+    budget = max(500, min(int(body.get("budget", 3000)), 40_000))
 
     def progress(status):
         run_status.clear()
@@ -33,7 +36,10 @@ def start_run(body):
 
     def worker():
         try:
-            pipeline.run(queries, langs, expand, max_niches, progress=progress)
+            if auto:
+                pipeline.run_auto(langs, budget, progress=progress)
+            else:
+                pipeline.run(queries, langs, expand, max_niches, progress=progress, translate=translate)
         except Exception as e:
             run_status.update(state="error", errors=[str(e)])
         finally:
@@ -75,11 +81,15 @@ class Handler(BaseHTTPRequestHandler):
             self._json(pipeline.load_results())
         elif self.path == "/api/status":
             self._json(run_status)
+        elif self.path == "/api/vault":
+            self._json({"items": pipeline.load_vault(), "statuses": pipeline.VAULT_STATUSES,
+                        "min_score": pipeline.VAULT_MIN_SCORE})
         elif self.path == "/api/config":
             self._json({
                 "languages": config.LANGUAGES,
                 "seeds": pipeline.DEFAULT_SEEDS,
                 "units_per_niche": pipeline.UNITS_PER_NICHE,
+                "auto": pipeline.auto_summary(),
                 "keys_configured": len(config.API_KEYS),
                 "keys_masked": [f"…{k[-4:]}" for k in config.API_KEYS],
                 "version": updater.current(),
@@ -111,10 +121,15 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._json({"error": "Анализ уже идёт"}, 409)
         elif self.path == "/api/delete":
-            with pipeline._lock:
-                results = [r for r in pipeline.load_results()
-                           if not (r["query"] == body.get("query") and r["lang"] == body.get("lang"))]
-                config.RESULTS_FILE.write_text(json.dumps(results, ensure_ascii=False, indent=1), encoding="utf-8")
+            pipeline.delete_result(body.get("query", ""), body.get("lang", ""))
+            self._json({"ok": True})
+        elif self.path == "/api/vault/add":
+            self._json({"ok": pipeline.vault_add_by_key(body.get("query", ""), body.get("lang", ""))})
+        elif self.path == "/api/vault/update":
+            pipeline.vault_update(body.get("key", ""), body.get("status"), body.get("note"))
+            self._json({"ok": True})
+        elif self.path == "/api/vault/remove":
+            pipeline.vault_remove(body.get("key", ""))
             self._json({"ok": True})
         elif self.path == "/api/keys":
             keys = config.save_api_keys(body.get("keys", ""))

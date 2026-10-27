@@ -7,6 +7,8 @@ DATA_DIR = ROOT / "data"
 CACHE_DIR = DATA_DIR / "cache"
 RESULTS_FILE = DATA_DIR / "results.json"
 QUOTA_FILE = DATA_DIR / "quota.json"
+VAULT_FILE = DATA_DIR / "vault.json"      # хранилище подходящих ниш
+AUTO_FILE = DATA_DIR / "autopilot.json"   # очередь подниш и пройденные категории автопоиска
 # Ключи, вписанные в настройках приложения, хранятся в data/.env: обновление папку data не трогает.
 KEYS_FILE = DATA_DIR / ".env"
 
@@ -57,6 +59,9 @@ MIN_DURATION_SEC = _int("MIN_DURATION_MIN", 8) * 60   # длинные роли�
 SMALL_CHANNEL_MAX_SUBS = _int("SMALL_CHANNEL_MAX_SUBS", 200_000)
 BIG_CHANNEL_SUBS = _int("BIG_CHANNEL_SUBS", 1_000_000)
 NEW_CHANNEL_DAYS = _int("NEW_CHANNEL_DAYS", 90)       # «новый канал» = первый ролик за последние 3 месяца
+# Каналы из этих стран не смотрим совсем (Индия и соседи): ни как примеры, ни как конкурентов.
+EXCLUDE_COUNTRIES = {c.strip().upper() for c in os.environ.get("EXCLUDE_COUNTRIES", "IN,PK,BD,NP,LK").split(",")
+                     if c.strip()}
 # Ролик с меньшим числом просмотров успехом не считается. Рынки ES/DE/FR меньше английского, порог ниже.
 MIN_VIEWS = {
     "en": _int("MIN_VIEWS_EN", _int("MIN_VIEWS", 10_000)),
