@@ -13,6 +13,7 @@ from . import config
 
 API_BASE = "https://www.googleapis.com/youtube/v3/"
 SUGGEST_URL = "https://suggestqueries.google.com/complete/search"
+TRANSLATE_URL = "https://translate.googleapis.com/translate_a/single"
 
 
 def ssl_context():
@@ -140,6 +141,7 @@ class YouTubeClient:
         self.quota = QuotaTracker(self.keys)
         self.current = 0
         self.units_this_run = 0
+        self.search_totals = {}   # (запрос, язык) -> сколько роликов по теме нашёл YouTube (сумма по длительностям)
 
     # --- низкий уровень ---
 
@@ -196,12 +198,16 @@ class YouTubeClient:
             "maxResults": max_results,
             "relevanceLanguage": lang,
             "order": "relevance",
-            # округляем до дня, чтобы кэш срабатывал весь день
-            "publishedAfter": published_after.strftime("%Y-%m-%dT00:00:00Z"),
+            # округляем до понедельника, чтобы кэш срабатывал всю неделю
+            "publishedAfter": (published_after - timedelta(days=published_after.weekday()))
+            .strftime("%Y-%m-%dT00:00:00Z"),
         }
         if duration:
             params["videoDuration"] = duration
         data = self._call("search", params)
+        # totalResults приблизительный, но хорошо отличает узкую тему (тысячи роликов) от массовой (сотни тысяч)
+        key = (query.lower(), lang)
+        self.search_totals[key] = self.search_totals.get(key, 0) + int(data.get("pageInfo", {}).get("totalResults", 0))
         return [item["id"]["videoId"] for item in data.get("items", []) if item.get("id", {}).get("videoId")]
 
     def videos(self, ids):
@@ -233,6 +239,22 @@ class YouTubeClient:
             return [i["contentDetails"].get("videoPublishedAt") for i in data.get("items", [])
                     if i.get("contentDetails", {}).get("videoPublishedAt")]
         return None
+
+    def translate(self, text, lang):
+        """Перевод темы на язык рынка через Google Translate (бесплатно, квоту не тратит).
+        Если перевести не удалось, возвращает текст как есть."""
+        params = {"client": "gtx", "sl": "auto", "tl": lang, "dt": "t", "q": text}
+        cached = self.cache.get("suggest", params)
+        if cached is not None:
+            return cached
+        try:
+            data = json.loads(self._http_get(TRANSLATE_URL + "?" + urllib.parse.urlencode(params)).decode("utf-8"))
+            out = "".join(part[0] for part in data[0] if part and part[0]).strip()
+        except Exception:
+            return text
+        if out:
+            self.cache.set("suggest", params, out)
+        return out or text
 
     def suggest(self, query, lang):
         """Подсказки поиска YouTube. Бесплатно, квоту не тратит."""

@@ -1,5 +1,5 @@
 {
- "version": 4,
- "notes": "индийские каналы больше не учитываются",
+ "version": 5,
+ "notes": "Автопоиск ниш по каталогу вечнозелёных тем, хранилище ниш, оценка вечнозелёности и насыщенности, перевод темы на языки рынков",
  "app_zip": "https://raw.githubusercontent.com/Omajati/youtube-niche-finder/main/release/NicheFinder.zip"
 }

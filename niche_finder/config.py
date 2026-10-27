@@ -7,6 +7,8 @@ DATA_DIR = ROOT / "data"
 CACHE_DIR = DATA_DIR / "cache"
 RESULTS_FILE = DATA_DIR / "results.json"
 QUOTA_FILE = DATA_DIR / "quota.json"
+VAULT_FILE = DATA_DIR / "vault.json"      # хранилище подходящих ниш
+AUTO_FILE = DATA_DIR / "autopilot.json"   # очередь подниш и пройденные категории автопоиска
 # Ключи, вписанные в настройках приложения, хранятся в data/.env: обновление папку data не трогает.
 KEYS_FILE = DATA_DIR / ".env"
 

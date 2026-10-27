@@ -113,6 +113,21 @@ class ScoringTest(unittest.TestCase):
         r = analyze("q", "en", [v_in, v_hg, v_ok], chs, now=NOW)
         self.assertEqual((r["videos_long"], r["skipped_region"]), (1, 2))
 
+    def test_evergreen_and_saturation(self):
+        chs = [channel(f"c{i}", 5_000, 500) for i in range(6)]
+        old = [video(f"o{i}", f"c{i}", 40_000) for i in range(6)]
+        for v in old:
+            v["snippet"]["publishedAt"] = "2026-05-01T00:00:00Z"
+        trendy = [video(f"t{i}", f"c{i}", 40_000) for i in range(6)]
+        for i, v in enumerate(trendy):
+            v["snippet"]["title"] = f"iPhone 18 leaks 2026 #{i}"
+        ever = analyze("q", "en", old, chs, now=NOW)
+        trend = analyze("q", "en", trendy, chs, now=NOW)
+        self.assertGreater(ever["scores"]["evergreen"], trend["scores"]["evergreen"])
+        narrow = analyze("q", "en", old, chs, now=NOW, search_total=1_500)
+        crowded = analyze("q", "en", old, chs, now=NOW, search_total=500_000)
+        self.assertGreater(narrow["scores"]["competition"], crowded["scores"]["competition"])
+
     def test_empty(self):
         self.assertEqual(analyze("q", "en", [], [], now=NOW)["score"], 0)
 
@@ -127,6 +142,8 @@ class FakeClient(YouTubeClient):
 
     def _http_get(self, url):
         self.calls.append(url)
+        if "translate.googleapis" in url:
+            return json.dumps([[["perdidos", "lost", None]]]).encode()
         if "suggestqueries" in url:
             return json.dumps(["q", ["q one", "q two"]]).encode()
         if "KEY_ONE" in url:
@@ -146,11 +163,13 @@ class FakeClient(YouTubeClient):
 class PipelineTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
-        self._orig = config.RESULTS_FILE
+        self._orig = (config.RESULTS_FILE, config.VAULT_FILE, config.AUTO_FILE)
         config.RESULTS_FILE = self.tmp / "results.json"
+        config.VAULT_FILE = self.tmp / "vault.json"
+        config.AUTO_FILE = self.tmp / "autopilot.json"
 
     def tearDown(self):
-        config.RESULTS_FILE = self._orig
+        config.RESULTS_FILE, config.VAULT_FILE, config.AUTO_FILE = self._orig
 
     def test_rotation_cache_and_expand(self):
         client = FakeClient(self.tmp)
@@ -168,6 +187,52 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(status2["units"], 0)
         self.assertEqual(client2.calls, [])
 
+    def test_translate_topic(self):
+        client = FakeClient(self.tmp)
+        plan = pipeline.plan_queries(client, ["lost"], ["es"], 0, 5, translate=True)
+        self.assertEqual(plan, [("perdidos", "es")])
+
+    def test_autopilot_scouts_deepens_and_queues(self):
+        client = FakeClient(self.tmp)
+        status = pipeline.run_auto(["en"], budget=1000, client=client)
+        self.assertEqual(status["state"], "finished")
+        self.assertLessEqual(status["units"], 1000)
+        results = pipeline.load_results()
+        depths = [r["depth"] for r in results]
+        self.assertIn("scout", depths)
+        self.assertIn("full", depths)
+        self.assertTrue(all(r["source"] == "auto" and r["category"] for r in results))
+        state = pipeline.load_auto_state()
+        self.assertEqual(state["runs"], 1)
+        self.assertTrue(state["seeded"]["en"])
+        # следующий запуск не повторяет уже разобранные темы
+        before = {r["query"] for r in results}
+        pipeline.run_auto(["en"], budget=1000, client=FakeClient(self.tmp))
+        after = [r["query"] for r in pipeline.load_results()]
+        self.assertEqual(len(after), len(set(after)))
+        self.assertGreater(len(set(after)), len(before))
+
+    def test_vault_keeps_status_and_respects_rejection(self):
+        r = {"query": "Odd Niche", "lang": "en", "score": 80, "depth": "full", "low_data": False}
+        pipeline.save_result(r)                       # хороший балл: попадает в хранилище сам
+        vault = pipeline.load_vault()
+        self.assertEqual((len(vault), vault[0]["added_by"]), (1, "auto"))
+        key = vault[0]["key"]
+        pipeline.vault_update(key, status="Беру в работу", note="снимаю в ноябре")
+        pipeline.save_result(dict(r, score=85))       # повторный анализ обновляет оценку, но не статус
+        v = pipeline.load_vault()[0]
+        self.assertEqual((v["score"], v["status"], v["note"]), (85, "Беру в работу", "снимаю в ноябре"))
+        pipeline.vault_update(key, status="Отказ")
+        pipeline.save_result(dict(r, score=90))       # отказ автопоиск не перебивает
+        self.assertEqual(pipeline.load_vault()[0]["score"], 85)
+        pipeline.save_result({"query": "weak", "lang": "en", "score": 40, "depth": "full", "low_data": False})
+        pipeline.save_result({"query": "scout", "lang": "en", "score": 90, "depth": "scout", "low_data": False})
+        self.assertEqual(len(pipeline.load_vault()), 1)
+        self.assertTrue(pipeline.vault_add_by_key("weak", "en"))
+        self.assertEqual(len(pipeline.load_vault()), 2)
+        pipeline.vault_remove(key)
+        self.assertEqual([v["query"] for v in pipeline.load_vault()], ["weak"])
+
     def test_all_keys_exhausted(self):
         client = FakeClient(self.tmp)
         client.quota.mark("KEY_TWO", "exhausted")
@@ -175,10 +240,6 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(status["state"], "quota_exhausted")
         with self.assertRaises(QuotaExhausted):
             client.search_videos("other", "en")
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class UpdaterTest(unittest.TestCase):
@@ -206,3 +267,7 @@ class UpdaterTest(unittest.TestCase):
             self.assertTrue(updater.check()["available"])
         finally:
             updater._latest = orig
+
+
+if __name__ == "__main__":
+    unittest.main()
