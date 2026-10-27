@@ -25,6 +25,10 @@ header { padding: 18px 24px 8px; display: flex; gap: 16px; align-items: flex-sta
 .top-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .top-actions .ver { color: var(--muted); font-size: 12px; }
 button.update { background: var(--good); }
+.title-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+.title-row h1 { margin: 0; }
+button.small { padding: 5px 10px; font-size: 12px; }
+.upd-msg { color: var(--muted); font-size: 12px; }
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; padding: 16px; z-index: 10; }
 .modal.open { display: flex; }
 .modal .panel { width: 100%; max-width: 520px; }
@@ -115,7 +119,9 @@ a { color: var(--accent); }
 <body>
 <header>
   <div>
-    <h1>Поиск ниш YouTube</h1>
+    <div class="title-row"><h1>Поиск ниш YouTube</h1>
+      <button class="ghost small" id="checkUpdBtn">Проверить обновления</button>
+      <span class="upd-msg" id="updMsg"></span></div>
     <div class="sub" id="criteria">Длинные видео, малые каналы, без миллионников</div>
   </div>
   <div class="top-actions">
@@ -567,16 +573,25 @@ $("keysSave").addEventListener("click", async () => {
   $("settings").classList.remove("open");
   await loadConfig();
 });
+$("checkUpdBtn").addEventListener("click", () => checkUpdate(true));
 $("quitBtn").addEventListener("click", async () => {
   if (!confirm("Выключить программу?")) return;
   try { await fetch("/api/shutdown", { method: "POST", body: "{}" }); } catch (e) {}
   document.body.innerHTML = '<p class="empty">Программа выключена. Окно можно закрыть.</p>';
 });
 
-async function checkUpdate() {
+async function checkUpdate(manual) {
   let u;
-  try { u = await (await fetch("/api/update/check")).json(); } catch (e) { return; }
-  if (!u.available) return;
+  const msg = $("updMsg");
+  if (manual === true) { $("checkUpdBtn").disabled = true; msg.textContent = "Проверяю…"; }
+  try { u = await (await fetch("/api/update/check" + (manual === true ? "?fresh=1" : ""))).json(); }
+  catch (e) { u = { error: "программа не отвечает" }; }
+  $("checkUpdBtn").disabled = false;
+  if (!u.available) {
+    if (manual === true) msg.textContent = u.error ? `Не удалось проверить: ${u.error}` : `У вас последняя версия (${u.current}).`;
+    return;
+  }
+  msg.textContent = `Есть версия ${u.latest}: нажмите зелёную кнопку справа.`;
   const btn = $("updateBtn");
   btn.style.display = "";
   btn.title = u.notes || "";
