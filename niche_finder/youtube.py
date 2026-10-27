@@ -240,6 +240,41 @@ class YouTubeClient:
                     if i.get("contentDetails", {}).get("videoPublishedAt")]
         return None
 
+    def channel_video_ids(self, channel_id, pages=4):
+        """id длинных роликов канала (до 50 × pages, новые первыми), 1 единица квоты на страницу."""
+        for prefix in ("UULF", "UU"):
+            ids, token = [], None
+            try:
+                for _ in range(pages):
+                    params = {"part": "contentDetails", "maxResults": 50, "playlistId": prefix + channel_id[2:]}
+                    if token:
+                        params["pageToken"] = token
+                    data = self._call("playlistItems", params)
+                    ids += [i["contentDetails"]["videoId"] for i in data.get("items", [])
+                            if i.get("contentDetails", {}).get("videoId")]
+                    token = data.get("nextPageToken")
+                    if not token:
+                        break
+            except NotFound:
+                continue
+            if ids:
+                return ids
+        return []
+
+    def comments(self, video_id, limit=20):
+        """Самые заметные комментарии к ролику (1 единица). Пусто, если комментарии закрыты."""
+        try:
+            data = self._call("commentThreads", {"part": "snippet", "videoId": video_id, "maxResults": limit,
+                                                 "order": "relevance", "textFormat": "plainText"})
+        except (NotFound, urllib.error.HTTPError):
+            return []
+        out = []
+        for item in data.get("items", []):
+            top = item.get("snippet", {}).get("topLevelComment", {}).get("snippet", {})
+            if top.get("textDisplay"):
+                out.append({"text": top["textDisplay"][:500], "likes": top.get("likeCount", 0)})
+        return out
+
     def translate(self, text, lang):
         """Перевод темы на язык рынка через Google Translate (бесплатно, квоту не тратит).
         Если перевести не удалось, возвращает текст как есть."""

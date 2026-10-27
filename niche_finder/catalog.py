@@ -133,3 +133,7 @@ CATEGORIES = [
 ]
 
 CATEGORY_BY_ID = {c["id"]: c for c in CATEGORIES}
+
+# Насколько RPM категории выше или ниже среднего для познавательных роликов (грубая оценка рекламного спроса)
+RPM_FACTOR = {"economics": 1.6, "body": 1.3, "psychology": 1.2, "engineering": 1.2, "inventions": 1.1,
+              "space": 1.1, "mythology": 0.9, "folklore": 0.9, "sleep": 0.7}

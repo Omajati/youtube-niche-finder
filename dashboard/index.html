@@ -40,6 +40,18 @@ button.small { padding: 5px 10px; font-size: 12px; }
 .set-grid input[type=text] { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font: inherit; box-sizing: border-box; }
 .set-grid .changed input, .set-grid .changed select { border-color: var(--accent); }
 .set-grid .hint { margin-top: 2px; }
+.claude-box { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 14px 0; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.claude-box select { width: auto; }
+.claude-box b { margin-right: 4px; }
+button.mini { padding: 3px 8px; font-size: 12px; }
+.rep h3 { margin: 16px 0 6px; font-size: 15px; }
+.rep p { margin: 4px 0 8px; }
+.rep table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.rep td, .rep th { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: top; }
+.rep .big { font-size: 28px; font-weight: 700; }
+.rep ol, .rep ul { margin: 4px 0 8px; padding-left: 20px; }
+.rep li { margin: 3px 0; }
+.rep .kv b { display: block; margin-top: 8px; }
 .filters { display: none; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 10px; margin: -4px 0 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; }
 .filters.open { display: grid; }
 .filters label { font-weight: 500; margin: 4px 0; font-size: 12px; }
@@ -154,10 +166,24 @@ a { color: var(--accent); }
       <li><a href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noopener">Включите YouTube Data API v3</a> (Enable).</li>
       <li><a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Create credentials → API key</a> и вставьте ключ сюда.</li>
     </ol>
+    <h2 style="margin-top:18px">Ключ Claude API (для разборов)</h2>
+    <label for="claudeKey">Нужен для кнопок «Разбор ниши» и «Разбор конкурента». Оплачивается отдельно от подписки Claude.</label>
+    <input type="text" id="claudeKey" placeholder="sk-ant-..." style="width:100%;box-sizing:border-box;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:8px 10px;font:inherit">
+    <div class="hint" id="claudeNow"></div>
+    <ol>
+      <li>Зайдите на <a href="https://console.anthropic.com/" target="_blank" rel="noopener">console.anthropic.com</a> и пополните баланс в Billing (хватит $5–10 на начало).</li>
+      <li>В разделе API Keys нажмите Create Key и вставьте ключ сюда.</li>
+    </ol>
     <div class="actions">
       <button id="keysSave">Сохранить</button>
       <button class="ghost" id="keysClose">Закрыть</button>
     </div>
+  </div>
+</div>
+<div class="modal" id="report">
+  <div class="panel wide">
+    <div id="reportBody" class="rep"></div>
+    <div class="actions"><button class="ghost" id="reportClose">Закрыть</button></div>
   </div>
 </div>
 <div class="modal" id="anSettings">
@@ -242,6 +268,7 @@ a { color: var(--accent); }
       <div><label for="fEver">Вечнозелёность от</label><input type="number" id="fEver" min="0" max="100" placeholder="любая"></div>
       <div><label for="fTotal">Роликов по теме до</label><input type="number" id="fTotal" min="0" step="1000" placeholder="любое"></div>
       <div><label for="fHits">Успешных роликов от</label><input type="number" id="fHits" min="0" placeholder="любое"></div>
+      <div><label for="fMonths">До 1000 подписчиков за, мес.</label><input type="number" id="fMonths" min="0" step="0.5" placeholder="любое"></div>
       <div><label for="fLen">Длина успешных от, мин</label><input type="number" id="fLen" min="0" placeholder="любая"></div>
       <div><label>&nbsp;</label><button class="ghost small" id="fClear">Сбросить фильтры</button></div>
     </div>
@@ -494,13 +521,14 @@ const FILTERS = [
   ["fTotal", r => (r.metrics || {}).search_total, "max"],
   ["fHits", r => (r.metrics || {}).hits_small, "min"],
   ["fLen", r => (r.metrics || {}).avg_length_successful_min, "min"],
+  ["fMonths", r => (r.metrics || {}).months_to_1k, "maxStrict"],
 ];
 function passFilters(r) {
   return FILTERS.every(([id, get, kind]) => {
     const raw = $(id).value;
     if (raw === "") return true;
     const v = get(r), lim = Number(raw);
-    if (v == null) return kind === "max";   // нет данных о насыщенности: не отбрасываем
+    if (v == null) return kind === "max";   // нет данных о насыщенности: не отбрасываем, о росте: отбрасываем
     return kind === "min" ? v >= lim : v <= lim;
   });
 }
@@ -561,7 +589,12 @@ function detail(r) {
     <div class="m">${fmt(v.views)} просм.${v.views_per_day ? ` (${fmt(v.views_per_day)}/день)` : ""} · <span class="ratio">${v.ratio}×</span> · ${v.duration_min} мин · ${v.published}</div></div></a>`).join("");
   const channels = (r.channels || []).map(c => `<tr>
     <td><a href="https://www.youtube.com/channel/${esc(c.id)}" target="_blank" rel="noopener">${esc(c.title)}</a>${c.is_new ? ' <span class="new">новый</span>' : ""}</td>
-    <td>${fmt(c.subs)}</td><td>${fmt(c.best_views)}</td><td>${c.video_count}</td><td>${c.uploads_per_week}${c.uploads_exact ? "" : "≈"}</td><td>${c.created}</td></tr>`).join("");
+    <td>${fmt(c.subs)}</td><td>${fmt(c.best_views)}</td><td>${c.video_count}</td><td>${c.uploads_per_week}${c.uploads_exact ? "" : "≈"}</td><td>${c.created}</td>
+    <td>${reportsByKey["channel|" + c.id] ? `<button class="ghost mini" data-open-rep="channel|${esc(c.id)}">Открыть разбор</button>` : ""}
+      <button class="ghost mini" data-chrep="${esc(c.id)}" data-title="${esc(c.title)}" data-niche="${esc(r.query)}">${reportsByKey["channel|" + c.id] ? "Заново" : "Разбор"}</button></td></tr>`).join("");
+  const inc = r.income;
+  const nrep = reportsByKey["niche|" + vkey(r)];
+  const sugg = (r.suggestions || []).map(t => `<button class="chip" data-tag="${esc(t)}">${esc(t)}</button>`).join("");
   const related = (r.related || []).map(t => `<button class="chip" data-tag="${esc(t)}">${esc(t)}</button>`).join("");
   return `<tr class="detail"><td colspan="10">
     <div class="dgrid">
@@ -575,12 +608,18 @@ function detail(r) {
       ${metric(`${r.videos_long} из ${r.videos_found}`, "роликов от 8 мин в выдаче")}
       ${metric(`${m.hits_old_share ?? 0}%`, "успешных роликов старше 2 месяцев")}
       ${metric(m.search_total ? fmt(m.search_total) : "–", "роликов по теме за полгода (по данным YouTube)")}
+      ${metric(m.months_to_1k != null ? `≈ ${m.months_to_1k} мес.` : "–", `до 1000 подписчиков у молодых каналов (дошли ${m.young_1k ?? 0} из ${m.young_channels ?? 0})`)}
+      ${metric(m.videos_for_4000h != null ? `≈ ${m.videos_for_4000h}` : "–", `успешных роликов для 4000 часов (${fmt(m.views_for_4000h || 0)} просм.)`)}
+      ${metric(m.ideas_total ?? "–", `запас идей: ${m.ideas_hits ?? 0} успешных тем и ${(r.suggestions || []).length} подсказок`)}
+      ${inc ? metric(`$${inc.rpm_low}–${inc.rpm_high}`, `RPM (оценка) · 100K ≈ $${inc.per_views["100000"].join("–")} · 1M ≈ $${inc.per_views["1000000"].join("–")}`) : ""}
     </div>
     ${r.depth === "scout" ? '<p class="hint">Это быстрая разведка по одному поиску, без проверки частоты загрузок. Нажмите «Полный анализ», чтобы проверить нишу целиком.</p>' : ""}
     ${crit}
+    ${claudeBox(r, nrep)}
     <h3>Лучшие ролики малых каналов (от ${mv} просмотров)</h3><div class="videos">${videos || `<span class="hint">нет роликов от ${mv}</span>`}</div>
-    <h3>Каналы</h3><div class="table-wrap"><table class="ch-table"><thead><tr><th>Канал</th><th>Подписчики</th><th>Лучший ролик</th><th>Видео</th><th title="Длинные ролики в неделю за последние 3 месяца">В неделю</th><th>Создан</th></tr></thead><tbody>${channels}</tbody></table></div>
+    <h3>Каналы</h3><div class="table-wrap"><table class="ch-table"><thead><tr><th>Канал</th><th>Подписчики</th><th>Лучший ролик</th><th>Видео</th><th title="Длинные ролики в неделю за последние 3 месяца">В неделю</th><th>Создан</th><th title="Разбор конкурента через Claude: топ-10 роликов, обложки, комментарии">Claude</th></tr></thead><tbody>${channels}</tbody></table></div>
     <h3>Похожие подниши (теги успешных роликов, нажмите чтобы добавить)</h3><div class="chips">${related || '<span class="hint">нет тегов</span>'}</div>
+    ${sugg ? `<h3>Что ещё ищут по теме (подсказки YouTube)</h3><div class="chips">${sugg}</div>` : ""}
     <div class="actions">
       ${inVault ? '<button class="ghost" disabled>★ В хранилище</button>' : `<button data-vadd="${esc(key(r))}">★ В хранилище</button>`}
       ${r.depth === "scout" ? `<button class="ghost" data-deep="${esc(key(r))}">Полный анализ</button>` : ""}
@@ -590,6 +629,16 @@ function detail(r) {
 }
 
 $("rows").addEventListener("click", async e => {
+  const orep = e.target.closest("[data-open-rep]");
+  if (orep) return openReport(orep.dataset.openRep);
+  const nrep = e.target.closest("[data-nrep]");
+  if (nrep) {
+    const r = results.find(x => key(x) === nrep.dataset.nrep);
+    return startReport({ kind: "niche", query: r.query, lang: r.lang, model: $("repModel").value });
+  }
+  const chrep = e.target.closest("[data-chrep]");
+  if (chrep) return startReport({ kind: "channel", channel_id: chrep.dataset.chrep, title: chrep.dataset.title,
+                                   niche: chrep.dataset.niche, model: $("repModel").value });
   const tag = e.target.closest("[data-tag]");
   if (tag) {
     const q = $("queries");
@@ -647,6 +696,83 @@ $("seeds").addEventListener("click", () => {
 ["queries", "expand", "max"].forEach(id => $(id).addEventListener("input", updateEstimate));
 $("langs").addEventListener("change", updateEstimate);
 
+// --- разборы через Claude ---
+let reportsByKey = {}, repPolling = null;
+async function loadReports() {
+  try { reportsByKey = await (await fetch("/api/reports")).json(); } catch (e) { reportsByKey = {}; }
+}
+function claudeBox(r, rep) {
+  const c = cfg.claude || {};
+  const models = Object.entries(c.models || {}).map(([k, n]) => `<option value="${k}" ${k === c.model ? "selected" : ""}>${esc(n)}</option>`).join("");
+  return `<div class="claude-box"><b>Разбор через Claude</b>
+    <select id="repModel" title="Модель для разборов в этой карточке">${models}</select>
+    ${rep ? `<button data-open-rep="niche|${esc(vkey(r))}">Открыть разбор ниши</button>` : ""}
+    <button class="${rep ? "ghost" : ""}" data-nrep="${esc(key(r))}">${rep ? "Разобрать заново" : "Разбор ниши"}</button>
+    <span class="hint" style="margin:0">${rep ? `разбор от ${rep.created_at.slice(0, 10)}, ≈ $${rep.cost_usd}` : "оценка 1–10 по 7 критериям, риски, свободный угол, 15 тем"}${c.configured ? "" : " · сначала впишите ключ Claude в «Ключи API»"}.
+    Конкурента можно разобрать кнопкой «Разбор» в таблице каналов.</span></div>`;
+}
+async function startReport(body) {
+  if (!(cfg.claude && cfg.claude.configured)) { openSettings(); return; }
+  const res = await fetch("/api/report", { method: "POST", body: JSON.stringify(body) });
+  const out = await res.json();
+  if (!res.ok) return showStatus(esc(out.error), true);
+  pollReport();
+}
+async function pollReport(initial) {
+  clearTimeout(repPolling);
+  let s;
+  try { s = await (await fetch("/api/report/status")).json(); } catch (e) { return; }
+  if (s.state === "running") {
+    const sec = Math.round((Date.now() - Date.parse(s.started_at)) / 1000);
+    showStatus(`Claude разбирает ${s.kind === "niche" ? "нишу" : "канал"} <b>${esc(s.title)}</b>… ${sec} с. Обычно это 1–4 минуты.`);
+    repPolling = setTimeout(() => pollReport(), 2000);
+    return;
+  }
+  if (initial === true) { lastShownReport = s.key; return; }   // при открытии программы старый результат не показываем
+  if (s.state === "error") return showStatus(esc(s.error), true);
+  if (s.state === "finished" && s.key !== lastShownReport) {
+    lastShownReport = s.key;
+    showStatus(`Разбор готов, стоил ≈ $${s.cost_usd}.`);
+    await loadReports(); render();
+    openReport(s.key);
+  }
+}
+let lastShownReport = null;
+const li = a => (a || []).map(x => `<li>${esc(x)}</li>`).join("");
+const kv = pairs => `<div class="kv">${pairs.filter(([, v]) => v).map(([k, v]) => `<b>${esc(k)}</b><div>${esc(v)}</div>`).join("")}</div>`;
+function openReport(k) {
+  const rep = reportsByKey[k];
+  if (!rep) return;
+  const d = rep.data || {};
+  const head = `<h2>${rep.kind === "niche" ? "Разбор ниши" : "Разбор конкурента"}: ${esc(rep.title)}</h2>
+    <div class="hint">${esc(rep.model)} · ${rep.created_at.slice(0, 16).replace("T", " ")} · ≈ $${rep.cost_usd}${rep.youtube_units ? ` · ${rep.youtube_units} ед. квоты YouTube` : ""}</div>`;
+  let body = "";
+  if (rep.kind === "niche") {
+    const inc = d.income || {};
+    body = `<p><span class="big">${d.total ?? "–"}/10</span> перспективность ниши</p><p>${esc(d.summary)}</p>
+      <h3>Критерии</h3><table><tr><th>Критерий</th><th>Оценка</th><th>Почему</th></tr>
+      ${(d.criteria || []).map(c => `<tr><td>${esc(c.name)}</td><td><b>${c.score}/10</b></td><td>${esc(c.comment)}</td></tr>`).join("")}</table>
+      <h3>Доход</h3>${kv([["RPM", inc.rpm_comment], ["100 000 просмотров в месяц", inc.at_100k], ["500 000", inc.at_500k], ["1 000 000", inc.at_1m], ["Дополнительная монетизация", inc.extra_monetization]])}
+      <h3>Три главных риска</h3><ol>${li(d.risks)}</ol>
+      <h3>Свободный угол</h3><p>${esc(d.angle)}</p>
+      <h3>15 тем для первых роликов</h3><ol>${(d.ideas || []).map(i => `<li><b>${esc(i.title)}</b> · ${esc(i.why)}</li>`).join("")}</ol>`;
+  } else {
+    const f = d.format || {}, s = d.success || {}, t = d.thumbnails || {}, a = d.audience || {}, l = d.launch || {}, v = d.verdict || {};
+    body = `<p><span class="big">${v.score ?? "–"}/10</span> насколько разумно запускать конкурирующий канал</p><p>${esc(d.summary)}</p>
+      <h3>1. Формат и структура</h3>${kv([["Средняя длительность", f.avg_duration], ["Как строится ролик", f.structure], ["Приёмы удержания", f.retention], ["Сценарный шаблон", f.script_template], ["Сложность производства", f.production]])}
+      <h3>2. Формат успешных видео</h3>${kv([["Темы с наибольшими просмотрами", s.top_topics], ["Что объединяет успешные", s.common_traits], ["Триггеры в названиях", s.title_triggers], ["Частые слова и формулировки", s.frequent_words], ["Формула заголовка", s.title_formula]])}
+      <h3>3. Стратегия превью</h3>${kv([["Эмоции", t.emotions], ["Закономерности", t.patterns], ["Как выделиться", t.stand_out]])}
+      <h3>4. Аудитория</h3>${kv([["Кто смотрит", a.who], ["Какие потребности закрывает", a.needs], ["Почему этот канал", a.why_this_channel], ["Почему возвращаются", a.why_return]])}
+      <h3>5. Слабые стороны и возможности</h3><ol>${(d.weaknesses || []).map(w => `<li><b>${esc(w.issue)}</b><br>${esc(w.how_to_use)}</li>`).join("")}</ol>
+      <h3>6. Запуск своего канала</h3>${kv([["Формат", l.format], ["Превью", l.thumbnail_tips], ["Продолжительность", l.duration]])}<b>10 идей для первых видео</b><ol>${li(l.ideas)}</ol>
+      <h3>7. Вердикт</h3>${kv([["Почему такая оценка", v.reasoning], ["Сильные стороны конкурента", v.competitor_strengths], ["Насколько сложно соперничать", v.difficulty]])}
+      <h3>Главное конкурентное преимущество</h3><p>${esc(d.main_advantage)}</p>`;
+  }
+  $("reportBody").innerHTML = head + body;
+  $("report").classList.add("open");
+}
+$("reportClose").addEventListener("click", () => $("report").classList.remove("open"));
+
 // --- настройки анализа ---
 let anSpec = null;
 const fmtNum = v => typeof v === "number" ? v.toLocaleString("ru-RU") : v;
@@ -666,13 +792,13 @@ function field(f) {
   const v = anSpec.values[f.key], d = anSpec.defaults[f.key];
   let input;
   if (f.kind === "choice") {
-    input = `<select data-k="${f.key}">${Object.entries(anSpec.durations).map(([k, n]) => `<option value="${k}" ${k === v ? "selected" : ""}>${esc(n)}</option>`).join("")}</select>`;
+    input = `<select data-k="${f.key}">${Object.entries(anSpec.choices[f.key]).map(([k, n]) => `<option value="${k}" ${k === v ? "selected" : ""}>${esc(n)}</option>`).join("")}</select>`;
   } else if (f.kind === "text") {
     input = `<input type="text" data-k="${f.key}" value="${esc(v)}">`;
   } else {
     input = `<input type="number" data-k="${f.key}" value="${v}" min="${f.min}" max="${f.max}" step="${f.kind === "float" ? "0.5" : "1"}">`;
   }
-  const def = f.kind === "choice" ? anSpec.durations[d] : fmtNum(d);
+  const def = f.kind === "choice" ? anSpec.choices[f.key][d] : fmtNum(d);
   return `<div data-f="${f.key}"><label>${esc(f.label)}</label>${input}
     <div class="hint">${f.hint ? esc(f.hint) + ". " : ""}По умолчанию: ${esc(def)}<span class="pct"></span></div></div>`;
 }
@@ -719,14 +845,17 @@ function openSettings() {
   $("keysNow").textContent = cfg.keys_configured
     ? `Сейчас задано ключей: ${cfg.keys_configured} (${cfg.keys_masked.join(", ")}). Новые ключи заменят их.`
     : "Ключи пока не заданы.";
+  $("claudeKey").value = "";
+  $("claudeNow").textContent = cfg.claude && cfg.claude.configured ? `Ключ Claude задан (${cfg.claude.masked}). Новый заменит его.` : "Ключ Claude пока не задан.";
   $("settings").classList.add("open");
 }
 $("settingsBtn").addEventListener("click", openSettings);
 $("keysClose").addEventListener("click", () => $("settings").classList.remove("open"));
 $("keysSave").addEventListener("click", async () => {
-  const keys = $("keysInput").value.trim();
-  if (!keys) return;
-  await fetch("/api/keys", { method: "POST", body: JSON.stringify({ keys }) });
+  const keys = $("keysInput").value.trim(), ck = $("claudeKey").value.trim();
+  if (!keys && !ck) return;
+  if (keys) await fetch("/api/keys", { method: "POST", body: JSON.stringify({ keys }) });
+  if (ck) await fetch("/api/keys/claude", { method: "POST", body: JSON.stringify({ key: ck }) });
   $("settings").classList.remove("open");
   await loadConfig();
 });
@@ -772,7 +901,7 @@ async function checkUpdate(manual) {
 loadConfig().then(() => {
   $("ver").textContent = cfg.version ? `версия ${cfg.version}` : "";
   if (!cfg.keys_configured) openSettings();
-}).then(restoreFilters).then(loadVault).then(loadResults).then(poll).then(checkUpdate);
+}).then(restoreFilters).then(loadReports).then(loadVault).then(loadResults).then(poll).then(() => pollReport(true)).then(checkUpdate);
 </script>
 </body>
 </html>

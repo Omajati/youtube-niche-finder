@@ -245,6 +245,17 @@ def analyze(query, lang, videos_raw, channels_raw, now=None, uploads=None, searc
     s_freq = 1 - _clamp((uploads_week - 1) / 6)   # <=1 видео в неделю -> 1, 7+ -> 0
     s_format = 0.5 * s_len + 0.5 * s_freq
 
+    # Рост: как быстро молодые (до года) малые каналы ниши набирают подписчиков
+    young = [c for c in used_channels if c["active_days"] <= 365 and c["subs"] <= config.SMALL_CHANNEL_MAX_SUBS]
+    months_to_1k = []
+    for c in young:
+        rate = c["subs"] / max(c["active_days"] / 30.4, 0.5)
+        if rate > 0:
+            months_to_1k.append(min(1000 / rate, 120))
+    # Монетизация: 4000 часов просмотра за год при средней длине успешных роликов и типичном удержании
+    views_for_4000h = 4000 * 60 / max(avg_len * config.RETENTION_PCT / 100, 0.1)
+    hit_median_views = median(v["views"] for v in hits) if hits else 0
+
     scores = {
         "outlier": s_outlier,
         "new_channels": s_new,
@@ -286,7 +297,16 @@ def analyze(query, lang, videos_raw, channels_raw, now=None, uploads=None, searc
             "search_total": search_total or 0,
             "hits_old_share": round(len(hits_old) / len(hits) * 100) if hits else 0,
             "trendy_share": round(len(trendy) / len(hits) * 100) if hits else 0,
+            "young_channels": len(young),
+            "young_1k": sum(1 for c in young if c["subs"] >= 1000),
+            "months_to_1k": round(median(months_to_1k), 1) if months_to_1k else None,
+            "views_for_4000h": int(views_for_4000h),
+            "videos_for_4000h": round(views_for_4000h / hit_median_views, 1) if hit_median_views else None,
+            "ideas_hits": len({v["title"].lower().strip() for v in hits}),
         },
+        # Все успешные ролики: запас идей и материал для разбора ниши
+        hit_titles=[{k: v[k] for k in ("id", "title", "channel", "subs", "views", "ratio", "duration_min", "age_days")}
+                    for v in sorted(hits, key=lambda x: x["views"], reverse=True)[:40]],
         top_videos=[{k: v[k] for k in ("id", "title", "channel", "subs", "views", "ratio", "duration_min", "published",
                                           "views_per_day")}
                     for v in sorted(hits, key=lambda x: x["ratio"], reverse=True)[:8]],
