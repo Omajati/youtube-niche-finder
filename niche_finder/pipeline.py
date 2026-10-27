@@ -5,7 +5,7 @@ import threading
 from datetime import datetime, timezone
 
 from . import config
-from .catalog import CATEGORIES
+from .catalog import CATEGORIES, RPM_FACTOR
 from .scoring import analyze, is_excluded_channel, weighted_total
 from .youtube import NoApiKeys, QuotaExhausted, YouTubeClient
 
@@ -133,7 +133,15 @@ def vault_add_by_key(query, lang):
 
 # --- анализ одной ниши ---
 
-def analyze_niche(client, query, lang, deep=True, meta=None):
+def income_estimate(lang, category=""):
+    """Примерный RPM и доход в месяц при 100K, 500K и 1M просмотров (нижняя и верхняя граница)."""
+    rpm = config.RPM.get(lang, config.RPM["en"]) * RPM_FACTOR.get(category, 1.0)
+    lo, hi = rpm * 0.6, rpm * 1.4
+    return {"rpm": round(rpm, 2), "rpm_low": round(lo, 2), "rpm_high": round(hi, 2),
+            "per_views": {str(n): [round(n / 1000 * lo), round(n / 1000 * hi)] for n in (100_000, 500_000, 1_000_000)}}
+
+
+def analyze_niche(client, query, lang, deep=True, meta=None, suggestions=None):
     """deep=False: разведка, один поиск и без последних роликов каналов (≈102 единицы)."""
     client.search_totals.pop((query.lower(), lang), None)
     durations = (config.SEARCH_DURATIONS or [None]) if deep else (config.SEARCH_DURATIONS or [None])[:1]
@@ -158,6 +166,14 @@ def analyze_niche(client, query, lang, deep=True, meta=None):
     total = client.search_totals.get((query.lower(), lang))
     result = analyze(query, lang, videos, channels, uploads=uploads, search_total=total)
     result.update(depth="full" if deep else "scout", **(meta or {}))
+    result["income"] = income_estimate(lang, result.get("category", ""))
+    if suggestions is None and deep:
+        try:   # подсказки YouTube бесплатны: это ещё темы внутри ниши
+            suggestions = [s for s in client.suggest(query, lang) if s.lower() != query.lower()]
+        except Exception:
+            suggestions = []
+    result["suggestions"] = suggestions or []
+    result["metrics"]["ideas_total"] = result["metrics"].get("ideas_hits", 0) + len(result["suggestions"])
     return result
 
 
@@ -381,11 +397,13 @@ def recheck_cached(progress=None, cache=None):
         status["current"] = f"{old['query']} [{old['lang']}]"
         meta = {k: old[k] for k in META_FIELDS if k in old}
         try:
-            new = analyze_niche(client, old["query"], old["lang"], deep=old.get("depth", "full") == "full", meta=meta)
+            new = analyze_niche(client, old["query"], old["lang"], deep=old.get("depth", "full") == "full", meta=meta,
+                                suggestions=old.get("suggestions", []))
             new["analyzed_at"] = old.get("analyzed_at", new.get("analyzed_at"))
             status["from_cache"] += 1
         except NoApiKeys:
-            new = dict(old, score=round(weighted_total(old.get("scores", {}))))
+            new = dict(old, score=round(weighted_total(old.get("scores", {}))),
+                       income=income_estimate(old["lang"], old.get("category", "")))
             status["weights_only"] += 1
         except Exception as e:
             status["errors"].append(f"{old['query']} [{old['lang']}]: {e}")

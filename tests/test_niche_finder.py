@@ -20,7 +20,8 @@ def channel(cid, subs, age_days, videos=20):
 
 
 def video(vid, cid, views, minutes=15, tags=(), lang=None):
-    sn = {"title": vid, "channelId": cid, "publishedAt": "2026-09-01T00:00:00Z", "tags": list(tags)}
+    sn = {"title": vid, "channelId": cid, "publishedAt": "2026-09-01T00:00:00Z", "tags": list(tags),
+          "thumbnails": {"high": {"url": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg"}}}
     if lang:
         sn["defaultAudioLanguage"] = lang
     return {"id": vid, "snippet": sn, "statistics": {"viewCount": str(views)},
@@ -128,6 +129,20 @@ class ScoringTest(unittest.TestCase):
         crowded = analyze("q", "en", old, chs, now=NOW, search_total=500_000)
         self.assertGreater(narrow["scores"]["competition"], crowded["scores"]["competition"])
 
+    def test_growth_monetization_and_ideas(self):
+        chs = [channel("young", 2_000, 120), channel("old", 50_000, 2000)]
+        vids = [video("a", "young", 30_000, minutes=20, tags=["x"]), video("b", "old", 60_000, minutes=20)]
+        r = analyze("q", "en", vids, chs, now=NOW)
+        m = r["metrics"]
+        self.assertEqual((m["young_channels"], m["young_1k"]), (1, 1))
+        self.assertAlmostEqual(m["months_to_1k"], 2.0, delta=0.1)     # 2000 подписчиков за ~4 месяца
+        self.assertEqual(m["views_for_4000h"], int(4000 * 60 / (20 * 0.35)))
+        self.assertEqual(m["videos_for_4000h"], round(m["views_for_4000h"] / 45_000, 1))
+        self.assertEqual(len(r["hit_titles"]), 2)
+        inc = pipeline.income_estimate("en", "economics")
+        self.assertEqual(inc["rpm"], round(config.RPM["en"] * 1.6, 2))
+        self.assertLess(inc["per_views"]["100000"][0], inc["per_views"]["100000"][1])
+
     def test_empty(self):
         self.assertEqual(analyze("q", "en", [], [], now=NOW)["score"], 0)
 
@@ -154,7 +169,13 @@ class FakeClient(YouTubeClient):
         if "/videos?" in url:
             return json.dumps({"items": [video("v1", "c1", 50_000), video("v2", "c1", 20_000)]}).encode()
         if "/playlistItems?" in url:
-            return json.dumps({"items": [{"contentDetails": {"videoPublishedAt": "2026-09-01T00:00:00Z"}}]}).encode()
+            return json.dumps({"items": [{"contentDetails": {"videoPublishedAt": "2026-09-01T00:00:00Z",
+                                                             "videoId": "v1"}},
+                                         {"contentDetails": {"videoPublishedAt": "2026-08-01T00:00:00Z",
+                                                             "videoId": "v2"}}]}).encode()
+        if "/commentThreads?" in url:
+            return json.dumps({"items": [{"snippet": {"topLevelComment": {"snippet": {
+                "textDisplay": "great story", "likeCount": 5}}}}]}).encode()
         if "/channels?" in url:
             return json.dumps({"items": [channel("c1", 4_000, 60)]}).encode()
         raise AssertionError(url)
@@ -268,6 +289,53 @@ class PipelineTest(unittest.TestCase):
             config.SETTINGS_FILE = orig_file
         self.assertEqual(config.current_settings(), config.SETTINGS_DEFAULTS)
         self.assertEqual(config.WEIGHTS["outlier"], 30)
+
+    def test_reports_collect_data_and_parse_claude_answer(self):
+        from niche_finder import reports
+        orig = (config.REPORTS_FILE, config.ANTHROPIC_API_KEY, reports._client)
+        config.REPORTS_FILE = self.tmp / "reports.json"
+        config.ANTHROPIC_API_KEY = "test"
+        sent = {}
+
+        class Stream:
+            def __init__(self, **kw):
+                sent.update(kw)
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                return False
+            def get_final_message(self):
+                text = json.dumps({"summary": "ok", "verdict": {"score": 7}})
+                return type("R", (), {"stop_reason": "end_turn", "model": sent["model"],
+                                      "content": [type("B", (), {"type": "text", "text": text})()],
+                                      "usage": type("U", (), {"input_tokens": 1_000_000, "output_tokens": 100_000,
+                                                              "cache_creation_input_tokens": 0,
+                                                              "cache_read_input_tokens": 0})()})()
+
+        fake = type("C", (), {})()
+        fake.beta = type("B", (), {"messages": type("M", (), {"stream": staticmethod(lambda **kw: Stream(**kw))})()})()
+        reports._client = lambda: fake
+        try:
+            client = FakeClient(self.tmp)
+            rep = reports.make_channel_report("UCabc", "claude-sonnet-5-5", client=client, niche="q")
+            self.assertEqual(rep["data"]["verdict"]["score"], 7)
+            self.assertEqual(rep["cost_usd"], 3.0)                      # 1M входа × $2 + 0.1M выхода × $10
+            self.assertGreater(rep["youtube_units"], 0)
+            content = sent["messages"][0]["content"]
+            self.assertEqual(content[0]["type"], "image")                # обложки идут картинками
+            self.assertIn("great story", content[-1]["text"])            # комментарии зрителей в данных
+            self.assertEqual(sent["output_config"]["format"]["type"], "json_schema")
+            self.assertIn("channel|UCabc", reports.load_reports())
+
+            pipeline.run(["q"], ["en"], max_niches=1, client=FakeClient(self.tmp))
+            rep = reports.make_niche_report(pipeline.load_results()[0], "claude-opus-5-5")
+            self.assertEqual(rep["cost_usd"], 6.0)
+            self.assertIn("успешные ролики малых каналов", sent["messages"][0]["content"][-1]["text"])
+            with self.assertRaises(reports.ReportError):
+                config.ANTHROPIC_API_KEY = ""
+                reports.start({"kind": "niche", "query": "q", "lang": "en"}, pipeline.load_results())
+        finally:
+            config.REPORTS_FILE, config.ANTHROPIC_API_KEY, reports._client = orig
 
     def test_all_keys_exhausted(self):
         client = FakeClient(self.tmp)
