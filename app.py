@@ -57,7 +57,14 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
-        if self.path in ("/", "/index.html"):
+        if self.path in ("/icon.png", "/favicon.ico"):
+            body = (config.ROOT / "dashboard" / "icon.png").read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path in ("/", "/index.html"):
             body = DASHBOARD.read_bytes()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -178,11 +185,29 @@ def run_window():
         except Exception:
             pass
 
+    def started():
+        threading.Thread(target=watch_server, daemon=True).start()
+        if sys.platform == "darwin":
+            # Окно открывает Python, поэтому в Dock по умолчанию его значок: ставим свой
+            try:
+                from AppKit import NSApplication, NSImage
+                NSApplication.sharedApplication().setApplicationIconImage_(
+                    NSImage.alloc().initWithContentsOfFile_(str(config.ROOT / "dashboard" / "icon.png")))
+            except Exception:
+                pass
+
+    if sys.platform == "darwin":
+        try:  # в меню «Поиск ниш», а не «Python»
+            from Foundation import NSBundle
+            info = NSBundle.mainBundle().localizedInfoDictionary() or NSBundle.mainBundle().infoDictionary()
+            info["CFBundleName"] = "Поиск ниш"
+        except Exception:
+            pass
+
     win = webview.create_window("Поиск ниш", URL, width=1360, height=880, min_size=(900, 600), text_select=True)
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
     try:
-        webview.start(lambda: threading.Thread(target=watch_server, daemon=True).start(),
-                      private_mode=False, storage_path=str(config.DATA_DIR / "window"))
+        webview.start(started, private_mode=False, storage_path=str(config.DATA_DIR / "window"))
     except Exception as e:
         print(f"Окно не открылось ({e}), открываю в браузере.")
         webbrowser.open(URL)
