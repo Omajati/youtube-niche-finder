@@ -12,7 +12,7 @@ import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from niche_finder import config, pipeline, updater
+from niche_finder import config, pipeline, reports, updater
 from niche_finder.youtube import YouTubeClient
 
 DASHBOARD = config.ROOT / "dashboard" / "index.html"
@@ -87,17 +87,24 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/vault":
             self._json({"items": pipeline.load_vault(), "statuses": pipeline.VAULT_STATUSES,
                         "min_score": config.VAULT_MIN_SCORE})
+        elif self.path == "/api/reports":
+            self._json(reports.load_reports())
+        elif self.path == "/api/report/status":
+            self._json(reports.status)
         elif self.path == "/api/settings":
             self._json({"values": config.current_settings(), "defaults": config.SETTINGS_DEFAULTS,
                         "spec": [dict(zip(("key", "group", "label", "kind", "min", "max", "hint"), s))
                                  for s in config.SETTINGS_SPEC],
-                        "durations": config.DURATION_CHOICES, "search_keys": sorted(config.SEARCH_SETTINGS)})
+                        "choices": config.CHOICES, "search_keys": sorted(config.SEARCH_SETTINGS)})
         elif self.path == "/api/config":
             self._json({
                 "languages": config.LANGUAGES,
                 "seeds": pipeline.DEFAULT_SEEDS,
                 "units_per_niche": pipeline.units_per_niche(),
                 "weights": config.WEIGHTS,
+                "claude": {"configured": bool(config.ANTHROPIC_API_KEY), "model": config.CLAUDE_MODEL,
+                           "models": {k: v["name"] for k, v in config.CLAUDE_MODELS.items()},
+                           "masked": f"…{config.ANTHROPIC_API_KEY[-4:]}" if config.ANTHROPIC_API_KEY else ""},
                 "auto": pipeline.auto_summary(),
                 "keys_configured": len(config.API_KEYS),
                 "keys_masked": [f"…{k[-4:]}" for k in config.API_KEYS],
@@ -150,6 +157,14 @@ class Handler(BaseHTTPRequestHandler):
             # пересчёт уже найденных ниш из кэша бесплатный, запускаем сразу
             rechecking = bool(changed) and bool(pipeline.load_results()) and start_run({"mode": "recheck"})
             self._json({"ok": True, "changed": changed, "rechecking": rechecking})
+        elif self.path == "/api/report":
+            try:
+                reports.start(body, pipeline.load_results())
+                self._json({"ok": True})
+            except reports.ReportError as e:
+                self._json({"error": str(e)}, 400)
+        elif self.path == "/api/keys/claude":
+            self._json({"ok": True, "configured": config.save_anthropic_key(body.get("key", ""))})
         elif self.path == "/api/keys":
             keys = config.save_api_keys(body.get("keys", ""))
             self._json({"ok": True, "count": len(keys)})

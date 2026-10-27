@@ -11,7 +11,8 @@ VAULT_FILE = DATA_DIR / "vault.json"      # хранилище подходящ�
 AUTO_FILE = DATA_DIR / "autopilot.json"   # очередь подниш и пройденные категории автопоиска
 # Ключи, вписанные в настройках приложения, хранятся в data/.env: обновление папку data не трогает.
 KEYS_FILE = DATA_DIR / ".env"
-SETTINGS_FILE = DATA_DIR / "settings.json"  # настройки анализа из окна «Настройки анализа»
+SETTINGS_FILE = DATA_DIR / "settings.json"
+REPORTS_FILE = DATA_DIR / "reports.json"    # разборы ниш и конкурентов через Claude  # настройки анализа из окна «Настройки анализа»
 
 
 def _load_dotenv():
@@ -38,20 +39,33 @@ def _split_keys(text):
 
 
 API_KEYS = _split_keys(os.environ.get("YOUTUBE_API_KEYS", ""))
+# Ключ Claude API для разборов ниш и конкурентов (console.anthropic.com), оплачивается отдельно от подписки
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+
+
+def _save_env_line(name, value):
+    lines = []
+    if KEYS_FILE.exists():
+        lines = [l for l in KEYS_FILE.read_text(encoding="utf-8").splitlines()
+                 if not l.strip().startswith(name + "=")]
+    lines.insert(0, f"{name}={value}")
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    KEYS_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def save_api_keys(text):
     """Сохраняет ключи из настроек приложения в data/.env и сразу начинает ими пользоваться."""
     keys = _split_keys(text)
-    lines = []
-    if KEYS_FILE.exists():
-        lines = [l for l in KEYS_FILE.read_text(encoding="utf-8").splitlines()
-                 if not l.strip().startswith("YOUTUBE_API_KEYS=")]
-    lines.insert(0, "YOUTUBE_API_KEYS=" + ",".join(keys))
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    KEYS_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _save_env_line("YOUTUBE_API_KEYS", ",".join(keys))
     API_KEYS[:] = keys
     return keys
+
+
+def save_anthropic_key(text):
+    global ANTHROPIC_API_KEY
+    ANTHROPIC_API_KEY = text.strip()
+    _save_env_line("ANTHROPIC_API_KEY", ANTHROPIC_API_KEY)
+    return bool(ANTHROPIC_API_KEY)
 
 LANGUAGES = {"en": "English", "es": "Español", "de": "Deutsch", "fr": "Français"}
 
@@ -87,6 +101,18 @@ EVERGREEN_AGE_DAYS = _int("EVERGREEN_AGE_DAYS", 60)       # успешный р�
 LOW_DATA_MIN_HITS = _int("LOW_DATA_MIN_HITS", 3)          # меньше успешных роликов малых каналов → «мало данных»
 VAULT_MIN_SCORE = _int("VAULT_MIN_SCORE", 65)             # с таким баллом ниша сама попадает в хранилище
 
+# Доход: RPM (доллары на 1000 просмотров длинных роликов) по рынкам. Точный RPM видит только владелец канала,
+# это средняя оценка для познавательных тем; у категорий есть свой множитель (catalog.py)
+RPM = {"en": 6.0, "de": 5.0, "fr": 4.0, "es": 2.5}
+RETENTION_PCT = _int("RETENTION_PCT", 35)   # среднее удержание для оценки часов просмотра, %
+
+# Модели Claude для разборов: цена в долларах за миллион токенов (вход, выход)
+CLAUDE_MODELS = {
+    "claude-opus-5-5": {"name": "Opus 5.5 (умнее)", "in": 4.0, "out": 20.0},
+    "claude-sonnet-5-5": {"name": "Sonnet 5.5 (дешевле)", "in": 2.0, "out": 10.0},
+}
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-opus-5-5")
+
 # Веса критериев в итоговом балле (нормируются, сумма может быть любой)
 WEIGHTS = {"outlier": 30, "new_channels": 20, "competition": 15, "evergreen": 15, "stability": 10, "format": 10}
 
@@ -97,10 +123,11 @@ CACHE_TTL_HOURS = {
     "channels": _int("CACHE_TTL_CHANNELS_H", 72),
     "playlistItems": _int("CACHE_TTL_UPLOADS_H", 72),
     "suggest": _int("CACHE_TTL_SUGGEST_H", 168),
+    "commentThreads": _int("CACHE_TTL_COMMENTS_H", 72),
 }
 
 # Стоимость запросов в единицах квоты (лимит 10 000 в день на ключ)
-UNIT_COST = {"search": 100, "videos": 1, "channels": 1, "playlistItems": 1}
+UNIT_COST = {"search": 100, "videos": 1, "channels": 1, "playlistItems": 1, "commentThreads": 1}
 DAILY_QUOTA_PER_KEY = 10_000
 
 PORT = _int("PORT", 8766)
@@ -142,10 +169,20 @@ SETTINGS_SPEC = [
     ("weight_evergreen", "Веса критериев", "Вечнозелёность", "int", 0, 100, ""),
     ("weight_stability", "Веса критериев", "Стабильный спрос", "int", 0, 100, ""),
     ("weight_format", "Веса критериев", "Формат и нагрузка", "int", 0, 100, ""),
+    ("rpm_en", "Доход", "RPM EN, $ за 1000 просмотров", "float", 0, 100, "Средняя оценка, точный RPM видит только владелец канала"),
+    ("rpm_es", "Доход", "RPM ES, $ за 1000 просмотров", "float", 0, 100, ""),
+    ("rpm_de", "Доход", "RPM DE, $ за 1000 просмотров", "float", 0, 100, ""),
+    ("rpm_fr", "Доход", "RPM FR, $ за 1000 просмотров", "float", 0, 100, ""),
+    ("retention_pct", "Доход", "Среднее удержание для оценки часов, %", "int", 5, 90,
+     "Для монетизации нужно 4000 часов просмотра за год"),
+    ("claude_model", "Разборы Claude", "Модель по умолчанию", "choice", None, None,
+     "Можно поменять у каждой кнопки разбора"),
     ("vault_min_score", "Хранилище", "Сама попадает в хранилище от балла", "int", 0, 101, "101 = только вручную"),
 ]
 # Настройки, от которых зависит, что ищется, а не как оценивается: их смена требует новых поисков (квота)
 SEARCH_SETTINGS = {"search_published_days", "search_durations"}
+CHOICES = {"search_durations": DURATION_CHOICES,
+           "claude_model": {k: v["name"] for k, v in CLAUDE_MODELS.items()}}
 
 _ATTRS = {"min_video_age_days": "MIN_VIDEO_AGE_DAYS", "evergreen_age_days": "EVERGREEN_AGE_DAYS",
           "search_published_days": "SEARCH_PUBLISHED_DAYS", "uploads_check_channels": "UPLOADS_CHECK_CHANNELS",
@@ -153,7 +190,8 @@ _ATTRS = {"min_video_age_days": "MIN_VIDEO_AGE_DAYS", "evergreen_age_days": "EVE
           "new_channel_days": "NEW_CHANNEL_DAYS", "ratio_target": "RATIO_TARGET",
           "new_channels_target": "NEW_CHANNELS_TARGET", "big_share_max": "BIG_SHARE_MAX",
           "saturation_low": "SATURATION_LOW", "saturation_high": "SATURATION_HIGH",
-          "low_data_min_hits": "LOW_DATA_MIN_HITS", "vault_min_score": "VAULT_MIN_SCORE"}
+          "low_data_min_hits": "LOW_DATA_MIN_HITS", "vault_min_score": "VAULT_MIN_SCORE",
+          "retention_pct": "RETENTION_PCT", "claude_model": "CLAUDE_MODEL"}
 
 
 def _get_setting(key):
@@ -162,6 +200,8 @@ def _get_setting(key):
         return MIN_DURATION_SEC // 60
     if key.startswith("min_views_"):
         return MIN_VIEWS[key[-2:]]
+    if key.startswith("rpm_"):
+        return RPM[key[-2:]]
     if key.startswith("weight_"):
         return WEIGHTS[key[len("weight_"):]]
     if key == "search_durations":
@@ -177,6 +217,8 @@ def _set_setting(key, value):
         g["MIN_DURATION_SEC"] = value * 60
     elif key.startswith("min_views_"):
         MIN_VIEWS[key[-2:]] = value
+    elif key.startswith("rpm_"):
+        RPM[key[-2:]] = value
     elif key.startswith("weight_"):
         WEIGHTS[key[len("weight_"):]] = value
     elif key == "search_durations":
@@ -192,7 +234,7 @@ def _clean(spec, value):
     key, _, _, kind, lo, hi, _ = spec
     if kind == "choice":
         value = str(value)
-        if value not in DURATION_CHOICES:
+        if value not in CHOICES[key]:
             raise ValueError(key)
         return value
     if kind == "text":
