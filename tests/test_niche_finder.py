@@ -233,6 +233,42 @@ class PipelineTest(unittest.TestCase):
         pipeline.vault_remove(key)
         self.assertEqual([v["query"] for v in pipeline.load_vault()], ["weak"])
 
+    def test_settings_and_free_recheck(self):
+        orig_file = config.SETTINGS_FILE
+        config.SETTINGS_FILE = self.tmp / "settings.json"
+        try:
+            client = FakeClient(self.tmp)
+            pipeline.run(["q"], ["en"], max_niches=1, client=client)
+            before = pipeline.load_results()[0]
+            # мусор и выход за пределы отбрасываются или зажимаются
+            changed = config.save_settings({"min_views_en": 30_000, "weight_outlier": 100, "weight_format": 0,
+                                            "uploads_check_channels": 999, "search_durations": "bogus",
+                                            "exclude_countries": " in, pk ,"})
+            self.assertEqual(config.MIN_VIEWS["en"], 30_000)
+            self.assertEqual(config.UPLOADS_CHECK_CHANNELS, 50)
+            self.assertEqual(config.SEARCH_DURATIONS, ["medium", "long"])
+            self.assertEqual(config.EXCLUDE_COUNTRIES, {"IN", "PK"})
+            self.assertIn("weight_outlier", changed)
+            self.assertEqual(json.loads(config.SETTINGS_FILE.read_text())["min_views_en"], 30_000)
+
+            status = pipeline.recheck_cached(cache=Cache(self.tmp / "cache"))
+            self.assertEqual((status["state"], status["units"], status["from_cache"]), ("finished", 0, 1))
+            after = pipeline.load_results()[0]
+            self.assertEqual(after["metrics"]["hits_small"], 1)   # 20K-ролик ниже нового порога 30K
+            self.assertLess(after["metrics"]["hits_small"], before["metrics"]["hits_small"])
+
+            # без кэша ниша пересчитывается только по весам
+            status = pipeline.recheck_cached(cache=Cache(self.tmp / "empty"))
+            self.assertEqual(status["weights_only"], 1)
+            r = pipeline.load_results()[0]
+            weights = {"outlier": 100, "new_channels": 20, "competition": 15, "evergreen": 15, "stability": 10}
+            self.assertEqual(r["score"], round(sum(r["scores"][k] * w for k, w in weights.items()) / 160))
+        finally:
+            config.reset_settings()
+            config.SETTINGS_FILE = orig_file
+        self.assertEqual(config.current_settings(), config.SETTINGS_DEFAULTS)
+        self.assertEqual(config.WEIGHTS["outlier"], 30)
+
     def test_all_keys_exhausted(self):
         client = FakeClient(self.tmp)
         client.quota.mark("KEY_TWO", "exhausted")

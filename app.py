@@ -28,6 +28,7 @@ def start_run(body):
     max_niches = max(1, min(int(body.get("max_niches", 10)), 50))
     translate = bool(body.get("translate"))
     auto = body.get("mode") == "auto"
+    recheck = body.get("mode") == "recheck"
     budget = max(500, min(int(body.get("budget", 3000)), 40_000))
 
     def progress(status):
@@ -36,7 +37,9 @@ def start_run(body):
 
     def worker():
         try:
-            if auto:
+            if recheck:
+                pipeline.recheck_cached(progress=progress)
+            elif auto:
                 pipeline.run_auto(langs, budget, progress=progress)
             else:
                 pipeline.run(queries, langs, expand, max_niches, progress=progress, translate=translate)
@@ -83,12 +86,18 @@ class Handler(BaseHTTPRequestHandler):
             self._json(run_status)
         elif self.path == "/api/vault":
             self._json({"items": pipeline.load_vault(), "statuses": pipeline.VAULT_STATUSES,
-                        "min_score": pipeline.VAULT_MIN_SCORE})
+                        "min_score": config.VAULT_MIN_SCORE})
+        elif self.path == "/api/settings":
+            self._json({"values": config.current_settings(), "defaults": config.SETTINGS_DEFAULTS,
+                        "spec": [dict(zip(("key", "group", "label", "kind", "min", "max", "hint"), s))
+                                 for s in config.SETTINGS_SPEC],
+                        "durations": config.DURATION_CHOICES, "search_keys": sorted(config.SEARCH_SETTINGS)})
         elif self.path == "/api/config":
             self._json({
                 "languages": config.LANGUAGES,
                 "seeds": pipeline.DEFAULT_SEEDS,
-                "units_per_niche": pipeline.UNITS_PER_NICHE,
+                "units_per_niche": pipeline.units_per_niche(),
+                "weights": config.WEIGHTS,
                 "auto": pipeline.auto_summary(),
                 "keys_configured": len(config.API_KEYS),
                 "keys_masked": [f"…{k[-4:]}" for k in config.API_KEYS],
@@ -131,6 +140,16 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/vault/remove":
             pipeline.vault_remove(body.get("key", ""))
             self._json({"ok": True})
+        elif self.path in ("/api/settings", "/api/settings/reset"):
+            if run_status.get("state") == "running":
+                return self._json({"error": "Дождитесь конца анализа"}, 409)
+            if self.path.endswith("reset"):
+                changed = config.reset_settings()
+            else:
+                changed = config.save_settings(body.get("values", {}))
+            # пересчёт уже найденных ниш из кэша бесплатный, запускаем сразу
+            rechecking = bool(changed) and bool(pipeline.load_results()) and start_run({"mode": "recheck"})
+            self._json({"ok": True, "changed": changed, "rechecking": rechecking})
         elif self.path == "/api/keys":
             keys = config.save_api_keys(body.get("keys", ""))
             self._json({"ok": True, "count": len(keys)})

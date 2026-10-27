@@ -1,5 +1,5 @@
 {
- "version": 6,
- "notes": "Кнопка «Проверить обновления» слева сверху",
+ "version": 7,
+ "notes": "Настройки анализа: все пороги и веса, бесплатный пересчёт найденных ниш, фильтры таблицы",
  "app_zip": "https://raw.githubusercontent.com/Omajati/youtube-niche-finder/main/release/NicheFinder.zip"
 }

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from . import config
 from .catalog import CATEGORIES
-from .scoring import analyze, is_excluded_channel
+from .scoring import analyze, is_excluded_channel, weighted_total
 from .youtube import NoApiKeys, QuotaExhausted, YouTubeClient
 
 # Стартовые темы для поиска по запросу, если тема не задана: по первому запросу каждой категории
@@ -16,11 +16,16 @@ DEFAULT_SEEDS = {lang: [c["seeds"][lang][0] for c in CATEGORIES[:6]] for lang in
 # Полный анализ: поиск по каждой длительности, статистика и последние ролики малых каналов.
 # Поиск разведки берётся из кэша, поэтому полный анализ после разведки стоит на 100 меньше.
 UNITS_SCOUT = 102
-UNITS_PER_NICHE = 100 * max(len(config.SEARCH_DURATIONS), 1) + 4 + config.UPLOADS_CHECK_CHANNELS
-UNITS_DEEP_AFTER_SCOUT = UNITS_PER_NICHE - 100
 
-# В хранилище сами попадают ниши с полным анализом, достаточными данными и таким баллом
-VAULT_MIN_SCORE = 65
+
+def units_per_niche():
+    return 100 * max(len(config.SEARCH_DURATIONS), 1) + 4 + config.UPLOADS_CHECK_CHANNELS
+
+
+def units_deep_after_scout():
+    return units_per_niche() - 100
+
+# В хранилище сами попадают ниши с полным анализом, достаточными данными и баллом от config.VAULT_MIN_SCORE
 
 _lock = threading.Lock()
 
@@ -57,7 +62,7 @@ def save_result(item):
         results.append(item)
         _write(config.RESULTS_FILE, results)
     if (item.get("depth", "full") == "full" and not item.get("low_data")
-            and item.get("score", 0) >= VAULT_MIN_SCORE):
+            and item.get("score", 0) >= config.VAULT_MIN_SCORE):
         vault_add(item, auto=True)
 
 
@@ -145,7 +150,11 @@ def analyze_niche(client, query, lang, deep=True, meta=None):
                  and not is_excluded_channel(c["snippet"].get("country"))
                  and int(c["statistics"].get("subscriberCount", 0)) <= config.SMALL_CHANNEL_MAX_SUBS]
         small.sort(key=lambda c: int(c["statistics"].get("subscriberCount", 0)))
-        uploads = {c["id"]: client.recent_uploads(c["id"]) for c in small[:config.UPLOADS_CHECK_CHANNELS]}
+        for c in small[:config.UPLOADS_CHECK_CHANNELS]:
+            try:
+                uploads[c["id"]] = client.recent_uploads(c["id"])
+            except NoApiKeys:   # пересчёт из кэша: этого канала в кэше нет, частота будет оценена грубо
+                pass
     total = client.search_totals.get((query.lower(), lang))
     result = analyze(query, lang, videos, channels, uploads=uploads, search_total=total)
     result.update(depth="full" if deep else "scout", **(meta or {}))
@@ -287,7 +296,7 @@ def run_auto(langs, budget=3000, progress=None, client=None):
     langs = [l for l in langs if l in config.LANGUAGES] or ["en"]
 
     n_scout = max(1, int(budget * 0.6) // UNITS_SCOUT)
-    n_deep = max(1, (budget - n_scout * UNITS_SCOUT) // UNITS_DEEP_AFTER_SCOUT)
+    n_deep = max(1, (budget - n_scout * UNITS_SCOUT) // units_deep_after_scout())
     status["total"] = n_scout + n_deep
     status["phase"] = "разведка"
     report(status)
@@ -319,7 +328,7 @@ def run_auto(langs, budget=3000, progress=None, client=None):
         status["phase"] = "полный анализ"
         ranked = sorted(scouted, key=lambda rm: (rm[0].get("low_data", True), -rm[0]["score"]))
         for r, meta in ranked[:n_deep]:
-            if client.units_this_run + UNITS_DEEP_AFTER_SCOUT > budget:
+            if client.units_this_run + units_deep_after_scout() > budget:
                 break
             full = _analyze_step(client, status, report, r["query"], r["lang"], True, meta)
             if full is False:
@@ -346,5 +355,51 @@ def auto_summary():
         "category_names": {c["id"]: c["name"] for c in CATEGORIES},
         "explored": sum(1 for r in results if r.get("source") == "auto"),
         "units_scout": UNITS_SCOUT,
-        "units_deep": UNITS_DEEP_AFTER_SCOUT,
+        "units_deep": units_deep_after_scout(),
     }
+
+
+# --- пересчёт по новым настройкам ---
+
+META_FIELDS = ("source", "category", "parent")
+
+
+def recheck_cached(progress=None, cache=None):
+    """Пересчитывает все найденные ниши по текущим настройкам из кэша, квоту не тратит.
+
+    Ниша, чьих данных в кэше уже нет (поиск хранится 3 дня), пересчитывается только по новым весам.
+    """
+    report = progress or (lambda s: None)
+    client = YouTubeClient(keys=[], cache=cache)   # без ключей: только кэш, запросов к API нет
+    status = _new_status()
+    status["mode"] = "recheck"
+    status["from_cache"] = status["weights_only"] = 0
+    results = load_results()
+    status["total"] = len(results)
+    report(status)
+    for old in results:
+        status["current"] = f"{old['query']} [{old['lang']}]"
+        meta = {k: old[k] for k in META_FIELDS if k in old}
+        try:
+            new = analyze_niche(client, old["query"], old["lang"], deep=old.get("depth", "full") == "full", meta=meta)
+            new["analyzed_at"] = old.get("analyzed_at", new.get("analyzed_at"))
+            status["from_cache"] += 1
+        except NoApiKeys:
+            new = dict(old, score=round(weighted_total(old.get("scores", {}))))
+            status["weights_only"] += 1
+        except Exception as e:
+            status["errors"].append(f"{old['query']} [{old['lang']}]: {e}")
+            new = old
+        save_result(new)
+        status["done"] += 1
+        report(status)
+    # оценки в хранилище тоже по новым весам, статусы и заметки остаются
+    with _lock:
+        fresh = {_key(r["query"], r["lang"]): r for r in load_results()}
+        vault = load_vault()
+        for v in vault:
+            r = fresh.get(v["key"])
+            if r:
+                v.update(score=r["score"], scores=r.get("scores", {}), metrics=r.get("metrics", {}))
+        _write(config.VAULT_FILE, vault)
+    return _finish(status, client, report)
