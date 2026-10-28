@@ -5,6 +5,7 @@ import threading
 from datetime import datetime, timezone
 
 from . import config
+from .words import topic_stems
 from .catalog import CATEGORIES, RPM_FACTOR, all_categories, category_names, similar_key
 from .scoring import analyze, is_excluded_channel, weighted_total
 from .youtube import NoApiKeys, QuotaExhausted, YouTubeClient
@@ -61,7 +62,7 @@ def save_result(item):
         results = [r for r in load_results() if _key(r["query"], r["lang"]) != _key(item["query"], item["lang"])]
         results.append(item)
         _write(config.RESULTS_FILE, results)
-    if (item.get("depth", "full") == "full" and not item.get("low_data")
+    if (item.get("depth", "full") == "full" and not item.get("low_data") and item.get("kind", "topic") == "topic"
             and item.get("score", 0) >= config.VAULT_MIN_SCORE):
         vault_add(item, auto=True)
 
@@ -334,7 +335,10 @@ def _seed_candidates(client, state, langs, limit):
             seeds = _seeds(client, cat, lang)
             seed = seeds[n % len(seeds)]
             # первый заход по категории берёт сам запрос, следующие уходят в подсказки YouTube
-            options = [seed] + [s for s in client.suggest(seed, lang) if s.lower() != seed.lower()]
+            # подсказки, ушедшие от темы («el universo explicado» → «… explicado en minutos»), не берём
+            core = topic_stems(seed)
+            options = [seed] + [s for s in client.suggest(seed, lang)
+                                if s.lower() != seed.lower() and (not core or core & topic_stems(s))]
             pick = next((o for o in options[(n // len(seeds)):] if similar_key(o, lang) not in seen), None)
             seeded[cat["id"]] = n + 1
             if pick:
@@ -345,8 +349,15 @@ def _seed_candidates(client, state, langs, limit):
 
 def _expand(client, state, result):
     """Лучшая ниша даёт подниши для следующих запусков: подсказки YouTube и теги успешных роликов."""
+    kind = result.get("kind", "topic")
+    if kind == "mixed":   # из каши подниши не растут: они уйдут ещё дальше от темы
+        return
     seen = _seen_similar(state["queue"])
     lang = result["lang"]
+    core = topic_stems(result["query"])
+
+    def on_topic(idea):   # подниша темы должна остаться про неё; у формата подниши это формат на разные темы
+        return kind == "format" or not core or bool(core & topic_stems(idea))
     def fresh(items, n):   # без почти одинаковых: «x facts» к нише «x» ничего нового не даёт
         out = []
         for idea in items:
@@ -355,9 +366,10 @@ def _expand(client, state, result):
                 seen.add(k)
                 out.append(idea)
         return out
-    ideas = fresh(client.suggest(result["query"], lang), 4) + fresh(result.get("related", []), 3)
+    ideas = (fresh([s for s in client.suggest(result["query"], lang) if on_topic(s)], 4)
+             + fresh([t for t in result.get("related", []) if on_topic(t)], 3))
     for idea in ideas:
-        state["queue"].append({"query": idea, "lang": lang, "category": result.get("category", ""),
+        state["queue"].append({"query": idea, "lang": lang, "category": result.get("category", "") if kind == "topic" else "",
                                "parent": result["query"], "priority": result["score"]})
 
 

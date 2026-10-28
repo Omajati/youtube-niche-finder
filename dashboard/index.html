@@ -96,6 +96,9 @@ tr.item:hover td { background: var(--accent-soft); }
 .score { display: inline-block; min-width: 38px; text-align: center; font-weight: 700; border-radius: 6px; padding: 3px 6px; color: #fff; }
 .lang { font-size: 11px; text-transform: uppercase; border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; color: var(--muted); }
 .badge { font-size: 11px; color: var(--mid); margin-left: 6px; font-weight: 500; }
+.kind { font-size: 11px; margin-left: 6px; font-weight: 600; padding: 1px 6px; border-radius: 4px; border: 1px solid currentColor; }
+.kind.format { color: var(--accent); } .kind.mixed { color: var(--bad); }
+.theme { margin: 10px 0 4px; } .theme .chip { cursor: default; }
 .bars { display: flex; gap: 3px; align-items: flex-end; height: 22px; }
 .bars span { width: 9px; background: var(--accent); border-radius: 2px 2px 0 0; display: block; }
 .bars i { display: flex; align-items: flex-end; height: 22px; width: 9px; background: var(--bar); border-radius: 2px; }
@@ -264,6 +267,7 @@ a { color: var(--accent); }
     <div class="toolbar">
       <select id="filterLang"><option value="">Все языки</option></select>
       <select id="filterDepth"><option value="">Любой анализ</option><option value="full">Только полный анализ</option><option value="scout">Только разведка</option></select>
+      <select id="filterKind" title="Тема: ролики выдачи про тему запроса. Формат: в запросе только подача («explicado en 10 minutos»). Каша: большинство роликов не про тему"><option value="">Темы, форматы и каша</option><option value="topic">Только темы</option><option value="format">Только форматы</option><option value="mixed">Только каша</option></select>
       <label style="margin:0;font-weight:400;display:inline-flex;gap:6px;align-items:center">
         <input type="checkbox" id="hideLow"> скрыть «мало данных»
       </label>
@@ -410,9 +414,26 @@ function updateAutoEstimate() {
     : `${cats}: загадки, древние цивилизации, космос, медицина, архитектура, шпионаж, финансы и другие.`;
 }
 
-const catName = r => (r.category && cfg.auto && cfg.auto.category_names[r.category]) || "";
+// категорию показываем, только если выдача правда про тему: у формата и каши она вводит в заблуждение
+const catName = r => (nicheKind(r) === "topic" && r.category && cfg.auto && cfg.auto.category_names[r.category]) || "";
+const nicheKind = r => r.kind || "topic";
+function kindBadge(r) {
+  const k = nicheKind(r), m = r.metrics || {};
+  if (k === "format") return `<span class="kind format" title="В запросе нет темы, только подача. YouTube выдаёт ролики про что угодно с такой подачей. Это рабочий формат: примените его к своей теме">формат</span>`;
+  if (k === "mixed") return `<span class="kind mixed" title="Только ${m.topic_match ?? 0}% роликов выдачи про тему запроса, остальное другие темы. Балл снижен">каша · ${m.topic_match ?? 0}% по теме</span>`;
+  return "";
+}
+function themeBox(r) {
+  const m = r.metrics || {}, k = nicheKind(r), tw = m.theme_words || [];
+  if (m.topic_match == null) return "";
+  const words = tw.length ? tw.map(([w, n]) => `<span class="chip">${esc(w)} <b>×${n}</b></span>`).join("") : '<span class="hint">общих слов в названиях нет: ролики про разное</span>';
+  const note = k === "format" ? "Это <b>формат</b>, а не тема: ролики объединяет подача, а не предмет. Баллы показывают, как работает сама подача. Чтобы понять нишу, проверьте формат на своей теме, например «тема + слова формата»."
+    : k === "mixed" ? `<b>Каша:</b> только ${m.topic_match}% роликов выдачи про тему запроса, остальное другие темы. Балл снижен. Лучше проверить запрос точнее.`
+    : `Ниша однородная: ${m.topic_match}% роликов выдачи про тему запроса.`;
+  return `<h3>О чём ролики в выдаче</h3><p class="hint" style="margin:0 0 6px">${note}</p><div class="chips theme">${words}</div>`;
+}
 function renderBest() {
-  const best = results.filter(r => (r.depth || "full") === "full" && !r.low_data)
+  const best = results.filter(r => (r.depth || "full") === "full" && !r.low_data && nicheKind(r) === "topic")
     .sort((a, b) => b.score - a.score).slice(0, 6);
   $("bestTitle").style.display = best.length ? "" : "none";
   $("best").innerHTML = best.map(r => `<div class="card" data-open="${esc(key(r))}">
@@ -613,10 +634,10 @@ function restoreFilters() {
 }
 
 function render() {
-  const lang = $("filterLang").value, hideLow = $("hideLow").checked, depth = $("filterDepth").value;
+  const lang = $("filterLang").value, hideLow = $("hideLow").checked, depth = $("filterDepth").value, kind = $("filterKind").value;
   renderBest();
   const rows = results.filter(r => (!lang || r.lang === lang) && (!hideLow || !r.low_data)
-    && (!depth || (r.depth || "full") === depth) && passFilters(r))
+    && (!depth || (r.depth || "full") === depth) && (!kind || nicheKind(r) === kind) && passFilters(r))
     .sort((a, b) => { const x = val(a, sortKey), y = val(b, sortKey); return (x > y ? 1 : x < y ? -1 : 0) * sortDir; });
   $("empty").style.display = rows.length ? "none" : "block";
   $("count").textContent = results.length ? `${rows.length} из ${results.length}` : "";
@@ -626,7 +647,7 @@ function render() {
     const inVault = vault.items.some(v => v.key === vkey(r));
     const main = `<tr class="item" data-key="${esc(key(r))}">
       <td><span class="score" style="background:${color(r.score)}">${r.score}</span></td>
-      <td class="q">${inVault ? "★ " : ""}${esc(r.query)}${r.depth === "scout" ? '<span class="scout" title="Быстрая оценка по одному поиску. Полный анализ делается для лучших.">разведка</span>' : ""}${r.low_data ? '<span class="badge">мало данных</span>' : ""}${r.category && cfg.auto || parentOf(r) ? `<div class="hint" style="margin:2px 0 0;font-weight:400">${r.category && cfg.auto ? esc(cfg.auto.category_names[r.category] || "") : ""}${r.category && cfg.auto && parentOf(r) ? " · " : ""}${parentOf(r) ? `от: ${findNiche(parentOf(r), r.lang) ? `<a href="#" data-goto="${esc(r.lang + "|" + findNiche(parentOf(r), r.lang).query)}">${esc(parentOf(r))}</a>` : esc(parentOf(r))}` : ""}${childrenOf(r).length ? ` · подниш: ${childrenOf(r).length}` : ""}</div>` : childrenOf(r).length ? `<div class="hint" style="margin:2px 0 0;font-weight:400">подниш: ${childrenOf(r).length}</div>` : ""}</td>
+      <td class="q">${inVault ? "★ " : ""}${esc(r.query)}${r.depth === "scout" ? '<span class="scout" title="Быстрая оценка по одному поиску. Полный анализ делается для лучших.">разведка</span>' : ""}${r.low_data ? '<span class="badge">мало данных</span>' : ""}${kindBadge(r)}${catName(r) || parentOf(r) ? `<div class="hint" style="margin:2px 0 0;font-weight:400">${esc(catName(r))}${catName(r) && parentOf(r) ? " · " : ""}${parentOf(r) ? `от: ${findNiche(parentOf(r), r.lang) ? `<a href="#" data-goto="${esc(r.lang + "|" + findNiche(parentOf(r), r.lang).query)}">${esc(parentOf(r))}</a>` : esc(parentOf(r))}` : ""}${childrenOf(r).length ? ` · подниш: ${childrenOf(r).length}` : ""}</div>` : childrenOf(r).length ? `<div class="hint" style="margin:2px 0 0;font-weight:400">подниш: ${childrenOf(r).length}</div>` : ""}</td>
       <td><span class="lang">${r.lang}</span></td>
       <td><div class="bars">${bars}</div></td>
       <td>${sc(r, "evergreen")}</td>
@@ -710,7 +731,7 @@ function showCompare(topic) {
 }
 function openNiche(k) {
   openKey = k;
-  $("filterLang").value = ""; $("filterDepth").value = ""; $("hideLow").checked = false;
+  $("filterLang").value = ""; $("filterDepth").value = ""; $("filterKind").value = ""; $("hideLow").checked = false;
   document.querySelector('#viewTabs [data-view="all"]').click();
   render();
   document.querySelector(`tr.item[data-key="${CSS.escape(openKey)}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -759,6 +780,7 @@ function detail(r) {
       ${inc ? metric(`$${inc.rpm_low}–${inc.rpm_high}`, `RPM (оценка) · 100K ≈ $${inc.per_views["100000"].join("–")} · 1M ≈ $${inc.per_views["1000000"].join("–")}`) : ""}
     </div>
     ${r.depth === "scout" ? '<p class="hint">Это быстрая разведка по одному поиску, без проверки частоты загрузок. Нажмите «Полный анализ», чтобы проверить нишу целиком.</p>' : ""}
+    ${themeBox(r)}
     ${crit}
     ${treeBox(r)}
     ${claudeBox(r, nrep)}
@@ -840,6 +862,7 @@ document.querySelectorAll("th[data-sort]").forEach(th => th.addEventListener("cl
 }));
 $("filterLang").addEventListener("change", render);
 $("filterDepth").addEventListener("change", render);
+$("filterKind").addEventListener("change", render);
 $("runAuto").addEventListener("click", runAuto);
 $("claudeTopics").addEventListener("click", () => {
   if (!confirm("Claude посмотрит каталог и лучшие найденные ниши и предложит 30 новых направлений на всех языках. Это стоит примерно $0,1. Запустить?")) return;

@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from statistics import mean, median
 
 from . import config
+from .words import FILLER, FORMAT, stem, topic_stems, words
 
 WEIGHTS = config.WEIGHTS   # меняются в окне «Настройки анализа»
 
@@ -114,6 +115,36 @@ def _activity(dates, now, created_days):
     per_week = len(recent) / (window / 7)
     first = (now - parsed[0]).days if len(parsed) < 50 else None
     return per_week, first, len(recent)
+
+
+def niche_shape(query, videos):
+    """Тема это или каша: о чём на самом деле ролики выдачи.
+
+    YouTube ищет по словам. Запрос из одних слов подачи («explicado en 10 minutos») собирает ролики про что угодно,
+    а запрос, ушедший от темы, собирает смесь. Тогда баллы честные, но описывают не одну нишу.
+    kind: topic (ролики про тему запроса), mixed (большинство роликов не про неё), format (в запросе нет темы).
+    """
+    q = topic_stems(query)
+    per_video = [topic_stems(v["title"] + " " + " ".join(v.get("tags", [])[:15])) for v in videos]
+    match = sum(1 for s in per_video if q & s) / len(videos) if q and videos else 0
+    # о чём ролики: самые частые слова названий (каждое слово по разу на ролик)
+    counts, shown = Counter(), {}
+    for v in videos:
+        seen = set()
+        for w in words(v["title"]):
+            st = stem(w)
+            if len(w) > 2 and w not in FILLER and w not in FORMAT and st not in seen:
+                seen.add(st)
+                counts[st] += 1
+                shown.setdefault(st, Counter())[w] += 1
+    theme = [[shown[st].most_common(1)[0][0], n] for st, n in counts.most_common(8) if n > 1]
+    if not q:
+        kind = "format"
+    elif match < config.TOPIC_MATCH_MIN / 100:
+        kind = "mixed"
+    else:
+        kind = "topic"
+    return kind, round(match * 100), theme
 
 
 def analyze(query, lang, videos_raw, channels_raw, now=None, uploads=None, search_total=None):
@@ -282,6 +313,10 @@ def analyze(query, lang, videos_raw, channels_raw, now=None, uploads=None, searc
         "format": s_format,
     }
     total = weighted_total(scores, scale=100)
+    # Каша из разных тем: баллы описывают не одну нишу, поэтому итог снижается вплоть до половины
+    kind, topic_match, theme = niche_shape(query, videos)
+    if kind == "mixed":
+        total *= 0.5 + 0.5 * topic_match / max(config.TOPIC_MATCH_MIN, 1)
 
     tag_counter = Counter()
     for v in ([v for v in hits if v["ratio"] >= 1] or hits):
@@ -293,7 +328,10 @@ def analyze(query, lang, videos_raw, channels_raw, now=None, uploads=None, searc
         score=round(total),
         scores={k: round(v * 100) for k, v in scores.items()},
         low_data=len(videos) < 10 or len(mature) < 5 or len(hits) < config.LOW_DATA_MIN_HITS,
+        kind=kind,
         metrics={
+            "topic_match": topic_match,     # % роликов выдачи, где в названии или тегах есть слова темы
+            "theme_words": theme,           # о чём ролики на самом деле: частые слова названий
             "median_ratio_small": round(median_ratio, 2),
             "median_views": int(median(v["views"] for v in videos)),
             "median_views_small": int(median(v["views"] for v in small)) if small else 0,

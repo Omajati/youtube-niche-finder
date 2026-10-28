@@ -19,8 +19,8 @@ def channel(cid, subs, age_days, videos=20):
             "statistics": {"subscriberCount": str(subs), "viewCount": "0", "videoCount": str(videos)}}
 
 
-def video(vid, cid, views, minutes=15, tags=(), lang=None):
-    sn = {"title": vid, "channelId": cid, "publishedAt": "2026-09-01T00:00:00Z", "tags": list(tags),
+def video(vid, cid, views, minutes=15, tags=(), lang=None, title=None):
+    sn = {"title": title or vid, "channelId": cid, "publishedAt": "2026-09-01T00:00:00Z", "tags": list(tags),
           "thumbnails": {"high": {"url": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg"}}}
     if lang:
         sn["defaultAudioLanguage"] = lang
@@ -36,7 +36,8 @@ class ScoringTest(unittest.TestCase):
 
     def test_good_niche_beats_saturated(self):
         good_ch = [channel(f"s{i}", 5_000, 400 if i > 2 else 40) for i in range(8)]
-        good_v = [video(f"g{i}", f"s{i}", 60_000, tags=["cold case", "mystery"]) for i in range(8)]
+        good_v = [video(f"g{i}", f"s{i}", 60_000, tags=["cold case", "mystery"], title=f"The odd niche case #{i}")
+                  for i in range(8)]
         good = analyze("odd niche", "en", good_v, good_ch, now=NOW)
 
         bad_ch = [channel(f"b{i}", 3_000_000, 3000) for i in range(6)] + [channel(f"t{i}", 50_000, 2000) for i in range(6)]
@@ -170,6 +171,23 @@ class ScoringTest(unittest.TestCase):
         self.assertEqual((en["metrics"]["new_target"], small["metrics"]["new_target"]), (3, 1.5))
         self.assertGreater(small["scores"]["new_channels"], en["scores"]["new_channels"])
         self.assertGreater(small["scores"]["stability"], en["scores"]["stability"])
+
+    def test_topic_format_or_mix(self):
+        chs = [channel(f"c{i}", 5_000, 500) for i in range(6)]
+        mix_titles = ["Todos los tipos de terremotos explicados en 10 minutos", "Los 7 niveles de Mercedes explicado",
+                      "Todos los procesadores AMD explicados", "Cada músculo del cuerpo explicado",
+                      "Todos los tipos de soldadura explicados", "La Odisea resumen en minutos"]
+        vids = [video(f"m{i}", f"c{i}", 60_000, title=t) for i, t in enumerate(mix_titles)]
+        fmt = analyze("explicado en 10 minutos", "es", vids, chs, now=NOW)
+        self.assertEqual(fmt["kind"], "format")                   # в запросе нет темы, только подача
+        space = analyze("el universo explicado", "es", vids, chs, now=NOW)
+        self.assertEqual((space["kind"], space["metrics"]["topic_match"]), ("mixed", 0))
+        self.assertLess(space["score"], fmt["score"])             # каша теряет балл
+        self.assertEqual(fmt["metrics"]["theme_words"], [])        # общей темы у роликов нет
+        stars = [video(f"s{i}", f"c{i}", 60_000, title=f"Tipos de estrellas del universo {i}") for i in range(6)]
+        topic = analyze("el universo explicado", "es", stars, chs, now=NOW)
+        self.assertEqual(topic["kind"], "topic")
+        self.assertIn(["estrellas", 6], topic["metrics"]["theme_words"])
 
     def test_empty(self):
         self.assertEqual(analyze("q", "en", [], [], now=NOW)["score"], 0)
