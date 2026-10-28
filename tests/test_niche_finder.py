@@ -269,6 +269,23 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual({(r["lang"], r["topic"], r["topic_title"]) for r in pipeline.load_results()},
                          {("es", "q|lost", "lost"), ("de", "q|lost", "lost")})
 
+    def test_similar_queries_and_custom_topics(self):
+        from niche_finder.catalog import similar_key, CATEGORIES
+        self.assertEqual(similar_key("Ancient Egypt facts", "en"), similar_key("ancient egypt documentary", "en"))
+        self.assertNotEqual(similar_key("ancient egypt pyramids", "en"), similar_key("ancient egypt", "en"))
+        self.assertGreaterEqual(len(CATEGORIES), 80)
+        old = list(config.CUSTOM_TOPICS)
+        try:
+            config.CUSTOM_TOPICS[:] = ["история шахмат"]
+            pipeline.run_auto(["es"], budget=500, client=FakeClient(self.tmp))
+            first = pipeline.load_results()[0]
+            self.assertTrue(first["category"].startswith("custom_"))   # своя тема идёт первой
+            self.assertEqual(first["query"], "perdidos")                # и переведена на язык рынка
+        finally:
+            config.CUSTOM_TOPICS[:] = old
+        self.assertEqual(config._clean(next(x for x in config.SETTINGS_SPEC if x[0] == "custom_topics"),
+                                       " a \n\nA\n b  c "), "a\nb c")
+
     def test_autopilot_scouts_deepens_and_queues(self):
         client = FakeClient(self.tmp)
         status = pipeline.run_auto(["en"], budget=1000, client=client)
@@ -350,10 +367,12 @@ class PipelineTest(unittest.TestCase):
     def test_reports_collect_data_and_parse_claude_answer(self):
         from niche_finder import reports
         orig = (config.REPORTS_FILE, config.SPEND_FILE, config.ANTHROPIC_API_KEY, reports._client)
+        orig_topics = config.TOPICS_FILE
         config.REPORTS_FILE = self.tmp / "reports.json"
         config.SPEND_FILE = self.tmp / "spend.json"
         config.ANTHROPIC_API_KEY = "test"
         sent = {}
+        answer = [{"summary": "ok", "verdict": {"score": 7}}]
 
         class Stream:
             def __init__(self, **kw):
@@ -363,7 +382,7 @@ class PipelineTest(unittest.TestCase):
             def __exit__(self, *a):
                 return False
             def get_final_message(self):
-                text = json.dumps({"summary": "ok", "verdict": {"score": 7}})
+                text = json.dumps(answer[0])
                 return type("R", (), {"stop_reason": "end_turn", "model": sent["model"],
                                       "content": [type("B", (), {"type": "text", "text": text})()],
                                       "usage": type("U", (), {"input_tokens": 1_000_000, "output_tokens": 100_000,
@@ -391,11 +410,23 @@ class PipelineTest(unittest.TestCase):
             self.assertIn("успешные ролики малых каналов", sent["messages"][0]["content"][-1]["text"])
             spend = reports.spend_summary()                               # счётчик расходов: оба разбора
             self.assertEqual((spend["total"], spend["month"], spend["count"]), (9.0, 9.0, 2))
+
+            # новые темы через Claude: повтор каталога отсеивается, остальное попадает в автопоиск
+            from niche_finder import catalog
+            config.TOPICS_FILE = self.tmp / "topics.json"
+            seeds = {l: ["chess history", "famous chess games"] for l in ("en", "es", "de", "fr", "ru")}
+            answer[0] = {"topics": [{"name": "История шахмат", "why": "мало каналов", "seeds": seeds},
+                                    {"name": "Космос", "why": "уже есть", "seeds": seeds}]}
+            out = reports.make_topic_ideas("claude-opus-5-5", pipeline.load_results())
+            self.assertEqual((out["added"], out["names"]), (1, ["История шахмат"]))
+            self.assertIn("История шахмат", catalog.category_names().values())
+            self.assertIn("Космос", sent["messages"][0]["content"][-1]["text"])   # Claude видит, что уже есть
             with self.assertRaises(reports.ReportError):
                 config.ANTHROPIC_API_KEY = ""
                 reports.start({"kind": "niche", "query": "q", "lang": "en"}, pipeline.load_results())
         finally:
             config.REPORTS_FILE, config.SPEND_FILE, config.ANTHROPIC_API_KEY, reports._client = orig
+            config.TOPICS_FILE = orig_topics
 
     def test_all_keys_exhausted(self):
         client = FakeClient(self.tmp)

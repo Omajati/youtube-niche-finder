@@ -278,6 +278,55 @@ def _ask(model, task, payload, schema, images=()):
     return data, {"input": tokens_in, "output": u.output_tokens or 0}, round(cost, 3), getattr(response, "model", model)
 
 
+TOPICS_SCHEMA = {
+    "type": "object", "additionalProperties": False, "required": ["topics"],
+    "properties": {"topics": {"type": "array", "items": {
+        "type": "object", "additionalProperties": False, "required": ["name", "why", "seeds"],
+        "properties": {
+            "name": {"type": "string"},
+            "why": {"type": "string"},
+            "seeds": {"type": "object", "additionalProperties": False, "required": list(LANG_NAMES),
+                      "properties": {l: {"type": "array", "items": {"type": "string"}} for l in LANG_NAMES}}}}}}}
+
+TOPICS_TASK = """Предложи 30 новых направлений для автопоиска ниш. Каждое направление — широкая вечнозелёная тема,
+внутри которой можно годами снимать длинные познавательные ролики без лица (закадровый голос, архивы, графика).
+
+Правила:
+- не повторяй направления из списка «уже есть в каталоге» и не дроби их на синонимы;
+- посмотри, какие проверенные ниши получили высокий балл, и предложи соседние, ещё не тронутые области;
+- без новостей, трендов, политики текущего дня, обзоров товаров, игровых летсплеев и детского контента;
+- без тем, рассчитанных на индийскую и южноазиатскую аудиторию.
+
+Для каждого направления: name — короткое название по-русски, why — одно предложение, почему тут может быть место
+для малого канала, seeds — по 2 поисковых запроса на каждом языке (en, es, de, fr, ru), так, как их набирают
+в поиске YouTube носители языка, в нижнем регистре, 2–4 слова."""
+
+
+def make_topic_ideas(model, results):
+    from .catalog import all_categories, load_claude_topics, save_claude_topics
+    cats = all_categories()
+    ranked = sorted((r for r in results if (r.get("depth") or "full") == "full"), key=lambda r: -r.get("score", 0))
+    payload = {"уже есть в каталоге": [c["name"] for c in cats],
+               "лучшие проверенные ниши": [{"запрос": r["query"], "язык": r["lang"], "балл": r["score"]}
+                                           for r in ranked[:30]],
+               "слабые проверенные ниши": [{"запрос": r["query"], "язык": r["lang"], "балл": r["score"]}
+                                          for r in ranked[-15:]] if len(ranked) > 30 else []}
+    data, tokens, cost, served = _ask(model, TOPICS_TASK, payload, TOPICS_SCHEMA)
+    known = {c["name"].lower() for c in cats}
+    topics, added = load_claude_topics(), []
+    for t in data.get("topics", []):
+        name = " ".join(str(t.get("name", "")).split())[:80]
+        seeds = {l: [q.strip().lower() for q in t.get("seeds", {}).get(l, []) if q.strip()][:3] for l in LANG_NAMES}
+        if not name or name.lower() in known or not all(seeds.values()):
+            continue
+        known.add(name.lower())
+        added.append({"id": f"claude_{len(topics) + len(added) + 1}", "name": name, "why": t.get("why", ""),
+                      "seeds": seeds, "added_at": _now(), "claude": True})
+    save_claude_topics(topics + added)
+    return {"cost_usd": cost, "added": len(added), "names": [a["name"] for a in added], "tokens": tokens,
+            "model": served}
+
+
 def make_niche_report(result, model):
     data, tokens, cost, served = _ask(model, NICHE_TASK, niche_payload(result), NICHE_SCHEMA)
     report = {"kind": "niche", "title": f"{result['query']} [{result['lang']}]", "query": result["query"],
@@ -318,6 +367,9 @@ def start(body, results):
             raise ReportError("Неверный канал")
         title, key = body.get("title") or cid, channel_key(cid)
         job = lambda: make_channel_report(cid, model, niche=body.get("niche"))
+    elif kind == "topics":
+        title, key = "новые темы для автопоиска", "topics"
+        job = lambda: make_topic_ideas(model, results)
     else:
         raise ReportError("Неизвестный разбор")
     if not config.ANTHROPIC_API_KEY:
@@ -328,7 +380,8 @@ def start(body, results):
     def worker():
         try:
             report = job()
-            status.update(state="finished", key=key, cost_usd=report["cost_usd"])
+            status.update(state="finished", key=key, cost_usd=report["cost_usd"], added=report.get("added"),
+                          names=report.get("names"))
         except ReportError as e:
             status.update(state="error", error=str(e))
         except Exception as e:

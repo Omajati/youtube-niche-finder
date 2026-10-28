@@ -1,5 +1,5 @@
 {
- "version": 14,
- "notes": "Дерево подниш: от какой ниши пошла подниша, её подниши с баллами и очередь",
+ "version": 15,
+ "notes": "85 категорий автопоиска, свои темы, новые темы через Claude, отсев почти одинаковых запросов",
  "app_zip": "https://raw.githubusercontent.com/Omajati/youtube-niche-finder/main/release/NicheFinder.zip"
 }

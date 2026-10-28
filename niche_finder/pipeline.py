@@ -5,7 +5,7 @@ import threading
 from datetime import datetime, timezone
 
 from . import config
-from .catalog import CATEGORIES, RPM_FACTOR
+from .catalog import CATEGORIES, RPM_FACTOR, all_categories, category_names, similar_key
 from .scoring import analyze, is_excluded_channel, weighted_total
 from .youtube import NoApiKeys, QuotaExhausted, YouTubeClient
 
@@ -302,40 +302,61 @@ def load_auto_state():
     return state
 
 
+def _seen_similar(extra=()):
+    """Ключи почти одинаковых запросов: всё проверенное и всё, что уже ждёт в очереди."""
+    seen = {similar_key(r["query"], r["lang"]) for r in load_results()}
+    seen.update(similar_key(q["query"], q["lang"]) for q in extra)
+    return seen
+
+
+def _seeds(client, cat, lang):
+    """Стартовые запросы категории на языке рынка. Свои темы и темы от Claude без перевода переводятся сами."""
+    seeds = cat["seeds"].get(lang)
+    if not seeds:
+        seeds = [client.translate(s, lang) for s in cat["seeds"].get("src", [])]
+    return [s for s in seeds if s] or [cat["name"]]
+
+
 def _seed_candidates(client, state, langs, limit):
-    """Темы из каталога: категории, которые разведывали реже всего, их запрос и подсказки YouTube."""
-    done = {_key(r["query"], r["lang"]) for r in load_results()}
+    """Темы из каталога: категории, которые разведывали реже всего, их запрос и подсказки YouTube.
+    Запрос, почти совпадающий с уже проверенным («… facts», «… documentary»), пропускается."""
+    seen = _seen_similar(state["queue"])
     out = []
     for lang in langs:
         seeded = state["seeded"].setdefault(lang, {})
-        cats = sorted(CATEGORIES, key=lambda c: (seeded.get(c["id"], 0), random.random()))
+        # свои темы и темы от Claude идут вперёд категорий каталога с тем же числом заходов
+        cats = sorted(all_categories(), key=lambda c: (seeded.get(c["id"], 0), not (c.get("custom") or c.get("claude")),
+                                                       random.random()))
         for cat in cats:
             if len([c for c in out if c["lang"] == lang]) >= limit:
                 break
             n = seeded.get(cat["id"], 0)
-            seeds = cat["seeds"][lang]
+            seeds = _seeds(client, cat, lang)
             seed = seeds[n % len(seeds)]
             # первый заход по категории берёт сам запрос, следующие уходят в подсказки YouTube
             options = [seed] + [s for s in client.suggest(seed, lang) if s.lower() != seed.lower()]
-            pick = next((o for o in options[(n // len(seeds)):] if _key(o, lang) not in done), None)
+            pick = next((o for o in options[(n // len(seeds)):] if similar_key(o, lang) not in seen), None)
             seeded[cat["id"]] = n + 1
             if pick:
+                seen.add(similar_key(pick, lang))
                 out.append({"query": pick, "lang": lang, "category": cat["id"], "parent": seed})
     return out
 
 
 def _expand(client, state, result):
     """Лучшая ниша даёт подниши для следующих запусков: подсказки YouTube и теги успешных роликов."""
-    done = {_key(r["query"], r["lang"]) for r in load_results()}
-    queued = {_key(q["query"], q["lang"]) for q in state["queue"]}
+    seen = _seen_similar(state["queue"])
     lang = result["lang"]
-    ideas = [s for s in client.suggest(result["query"], lang) if s.lower() != result["query"].lower()][:4]
-    ideas += result.get("related", [])[:3]
+    def fresh(items, n):   # без почти одинаковых: «x facts» к нише «x» ничего нового не даёт
+        out = []
+        for idea in items:
+            k = similar_key(idea, lang)
+            if len(out) < n and k not in seen:
+                seen.add(k)
+                out.append(idea)
+        return out
+    ideas = fresh(client.suggest(result["query"], lang), 4) + fresh(result.get("related", []), 3)
     for idea in ideas:
-        k = _key(idea, lang)
-        if k in done or k in queued:
-            continue
-        queued.add(k)
         state["queue"].append({"query": idea, "lang": lang, "category": result.get("category", ""),
                                "parent": result["query"], "priority": result["score"]})
 
@@ -415,8 +436,11 @@ def auto_summary():
         "runs": state["runs"],
         "last_run": state.get("last_run"),
         "queue": len(state["queue"]),
-        "categories": len(CATEGORIES),
-        "category_names": {c["id"]: c["name"] for c in CATEGORIES},
+        "categories": len(all_categories()),
+        "categories_base": len(CATEGORIES),
+        "categories_custom": len(config.CUSTOM_TOPICS),
+        "categories_claude": len(all_categories()) - len(CATEGORIES) - len(config.CUSTOM_TOPICS),
+        "category_names": category_names(),
         "explored": sum(1 for r in results if r.get("source") == "auto"),
         "units_scout": UNITS_SCOUT,
         "units_deep": units_deep_after_scout(),

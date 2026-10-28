@@ -168,7 +168,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 changed = config.save_settings(body.get("values", {}))
             # пересчёт уже найденных ниш из кэша бесплатный, запускаем сразу
-            rechecking = bool(changed) and bool(pipeline.load_results()) and start_run({"mode": "recheck"})
+            rechecking = bool(set(changed) - config.NO_RECHECK) and bool(pipeline.load_results()) and start_run({"mode": "recheck"})
             self._json({"ok": True, "changed": changed, "rechecking": rechecking})
         elif self.path == "/api/report":
             try:
