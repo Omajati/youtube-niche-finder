@@ -91,6 +91,8 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/vault":
             self._json({"items": pipeline.load_vault(), "statuses": pipeline.VAULT_STATUSES,
                         "min_score": config.VAULT_MIN_SCORE})
+        elif self.path == "/api/claude/spend":
+            self._json(reports.spend_summary())
         elif self.path == "/api/reports":
             self._json(reports.load_reports())
         elif self.path == "/api/report/status":

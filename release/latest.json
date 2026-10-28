@@ -1,5 +1,5 @@
 {
- "version": 12,
- "notes": "Поправка на размер рынка в оценке и расклад критериев в сравнении языков",
+ "version": 13,
+ "notes": "Счётчик расходов на Claude справа сверху",
  "app_zip": "https://raw.githubusercontent.com/Omajati/youtube-niche-finder/main/release/NicheFinder.zip"
 }

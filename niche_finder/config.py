@@ -12,6 +12,7 @@ AUTO_FILE = DATA_DIR / "autopilot.json"   # очередь подниш и пр�
 # Ключи, вписанные в настройках приложения, хранятся в data/.env: обновление папку data не трогает.
 KEYS_FILE = DATA_DIR / ".env"
 SETTINGS_FILE = DATA_DIR / "settings.json"
+SPEND_FILE = DATA_DIR / "claude_spend.json"   # сколько потрачено на Claude: всего и по месяцам
 REPORTS_FILE = DATA_DIR / "reports.json"    # разборы ниш и конкурентов через Claude  # настройки анализа из окна «Настройки анализа»
 
 

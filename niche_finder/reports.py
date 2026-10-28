@@ -40,6 +40,40 @@ def _save_report(key, report):
         config.REPORTS_FILE.write_text(json.dumps(reports, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
+def load_spend():
+    """Расходы на Claude. Если учёта ещё нет, начинаем с суммы уже сделанных разборов."""
+    try:
+        return json.loads(config.SPEND_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        pass
+    spend = {"total": 0.0, "count": 0, "months": {}}
+    for r in load_reports().values():
+        cost = r.get("cost_usd") or 0
+        month = (r.get("created_at") or _now())[:7]
+        spend["total"] += cost
+        spend["count"] += 1
+        spend["months"][month] = spend["months"].get(month, 0) + cost
+    return spend
+
+
+def add_spend(cost):
+    """Учитывает каждый ответ Claude, даже если разбор потом перезапишут или он упадёт на разборе ответа."""
+    with _lock:
+        spend = load_spend()
+        month = _now()[:7]
+        spend["total"] = round(spend["total"] + cost, 4)
+        spend["count"] += 1
+        spend["months"][month] = round(spend["months"].get(month, 0) + cost, 4)
+        config.SPEND_FILE.parent.mkdir(parents=True, exist_ok=True)
+        config.SPEND_FILE.write_text(json.dumps(spend, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def spend_summary():
+    spend = load_spend()
+    return {"total": round(spend["total"], 2), "count": spend["count"],
+            "month": round(spend["months"].get(_now()[:7], 0), 2), "months": spend["months"]}
+
+
 def niche_key(query, lang):
     return f"niche|{lang}|{query.lower().strip()}"
 
@@ -226,6 +260,12 @@ def _ask(model, task, payload, schema, images=()):
         raise ReportError(f"Claude API вернул ошибку {e.status_code}: {e.message}")
     except anthropic.APIConnectionError:
         raise ReportError("Нет связи с Claude API. Проверьте интернет.")
+    u = response.usage
+    tokens_in = (u.input_tokens or 0) + (getattr(u, "cache_creation_input_tokens", 0) or 0) \
+        + (getattr(u, "cache_read_input_tokens", 0) or 0)
+    price = config.CLAUDE_MODELS.get(model, config.CLAUDE_MODELS["claude-opus-5-5"])
+    cost = tokens_in / 1e6 * price["in"] + (u.output_tokens or 0) / 1e6 * price["out"]
+    add_spend(cost)   # за ответ платим, даже если дальше он не подойдёт
     if response.stop_reason == "refusal":
         raise ReportError("Claude отказался разбирать эти данные.")
     if response.stop_reason == "max_tokens":
@@ -235,11 +275,6 @@ def _ask(model, task, payload, schema, images=()):
         data = json.loads(text)
     except ValueError:
         raise ReportError("Claude вернул ответ не в том формате. Попробуйте ещё раз.")
-    u = response.usage
-    tokens_in = (u.input_tokens or 0) + (getattr(u, "cache_creation_input_tokens", 0) or 0) \
-        + (getattr(u, "cache_read_input_tokens", 0) or 0)
-    price = config.CLAUDE_MODELS.get(model, config.CLAUDE_MODELS["claude-opus-5-5"])
-    cost = tokens_in / 1e6 * price["in"] + (u.output_tokens or 0) / 1e6 * price["out"]
     return data, {"input": tokens_in, "output": u.output_tokens or 0}, round(cost, 3), getattr(response, "model", model)
 
 
