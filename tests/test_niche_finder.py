@@ -67,6 +67,19 @@ class ScoringTest(unittest.TestCase):
         r = analyze("q", "fr", [hindi, script, ok], chs, now=NOW)
         self.assertEqual((r["videos_long"], r["skipped_lang"], r["skipped_region"]), (1, 1, 1))
 
+    def test_russian_market(self):
+        chs = [channel("a", 1000, 500), channel("b", 1000, 500)]
+        ru = video("ru", "a", 20_000); ru["snippet"]["title"] = "Тайна перевала Дятлова: что случилось на самом деле"
+        ua = video("ua", "a", 20_000); ua["snippet"]["title"] = "Таємниця перевалу: що сталося насправді і чому"
+        en = video("en", "b", 20_000); en["snippet"]["title"] = "The Dyatlov Pass mystery"
+        r = analyze("перевал дятлова", "ru", [ru, ua, en], chs, now=NOW)
+        self.assertEqual((r["videos_long"], r["skipped_lang"]), (1, 2))
+        # и наоборот: на английском рынке кириллица отсекается
+        self.assertEqual(analyze("q", "en", [ru, en], chs, now=NOW)["videos_long"], 1)
+        from niche_finder.catalog import CATEGORIES
+        self.assertTrue(all(len(c["seeds"]["ru"]) == 2 for c in CATEGORIES))
+        self.assertIn("ru", pipeline.DEFAULT_SEEDS)
+
     def test_low_view_videos_are_not_hits(self):
         # у крошечных каналов ratio огромный, но до 10K просмотров не дотягивает никто
         chs = [channel(f"c{i}", 100, 500) for i in range(10)]
