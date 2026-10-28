@@ -1,5 +1,5 @@
 {
- "version": 16,
- "notes": "Разборы Claude учитывают ИИ-производство: блок «где работает ИИ-контент»",
+ "version": 17,
+ "notes": "Тема, формат или каша: проверка выдачи, штраф за кашу, подниши не уходят от темы",
  "app_zip": "https://raw.githubusercontent.com/Omajati/youtube-niche-finder/main/release/NicheFinder.zip"
 }

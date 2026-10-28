@@ -9,6 +9,7 @@ import json
 import re
 
 from . import config
+from .words import FILLER, FORMAT
 
 CATEGORIES = [
     {"id": "mysteries", "name": "Загадки и необъяснимое", "seeds": {
@@ -392,22 +393,11 @@ def category_names():
 
 # --- почти одинаковые запросы ---
 
-# Слова, которые не меняют тему: «ancient egypt facts» и «ancient egypt documentary» это одна ниша
-FILLER = set("""
-facts fact documentary documentaries explained explanation full video videos story stories top best amazing
-interesting the a an of in for and about to on what why how
-documental documentales explicado explicada datos curiosidades completo el la los las de del y en un una sobre
-doku dokumentation erklärt fakten ganze der die das den dem und von im in über ein eine zum
-documentaire documentaires expliqué expliquée faits complet le la les de des du et en un une sur
-документальный документальные фильм факты простыми словами интересные интересно и в о об про на
-""".split())
-
-
 def similar_key(query, lang=""):
     """Ключ для отсева почти одинаковых запросов: без слов-пустышек, чисел и окончаний множественного числа."""
     words = []
     for w in re.findall(r"\w+", query.lower()):
-        if w in FILLER or w.isdigit():
+        if w in FILLER or w in FORMAT or w.isdigit():
             continue
         if len(w) > 4 and w.endswith("s"):
             w = w[:-1]

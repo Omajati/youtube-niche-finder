@@ -109,6 +109,8 @@ VAULT_MIN_SCORE = _int("VAULT_MIN_SCORE", 65)             # с таким бал
 # В России монетизация YouTube для местных каналов отключена с 2022 года: RPM русскоязычной аудитории низкий,
 # доход обычно идёт с интеграций и донатов (Boosty и т.п.)
 RPM = {"en": 6.0, "de": 5.0, "fr": 4.0, "es": 2.5, "ru": 0.7}
+TOPIC_MATCH_MIN = _int("TOPIC_MATCH_MIN", 50)   # меньше стольких % роликов про тему запроса: выдача считается кашей
+
 # Свои темы для автопоиска: по одной на строку, на любом языке (на другие рынки переводятся)
 CUSTOM_TOPICS = []
 # Эти настройки не влияют на оценку: при их изменении ниши не пересчитываются
@@ -119,7 +121,7 @@ NO_RECHECK = {"custom_topics", "claude_model"}
 # небольшой рынок проигрывал бы просто из-за размера
 MARKET_SIZE = {"en": 1.0, "es": 0.6, "de": 0.5, "fr": 0.5, "ru": 0.7}
 # Меняется, когда меняется формула оценки: при запуске старые ниши пересчитываются из кэша
-SCORING_VERSION = 2
+SCORING_VERSION = 3
 SCORING_VERSION_FILE = DATA_DIR / "scoring_version"
 RETENTION_PCT = _int("RETENTION_PCT", 35)   # среднее удержание для оценки часов просмотра, %
 
@@ -180,6 +182,8 @@ SETTINGS_SPEC = [
     ("big_share_max", "Цели оценки", "Доля миллионников, при которой конкуренция = 0, %", "int", 1, 100, ""),
     ("saturation_low", "Цели оценки", "Тема узкая, если роликов на YouTube до", "int", 10, 10_000_000, ""),
     ("saturation_high", "Цели оценки", "Тема массовая, если роликов от", "int", 100, 100_000_000, ""),
+    ("topic_match_min", "Цели оценки", "Каша, если про тему запроса меньше, % роликов", "int", 0, 100,
+     "Ролик про тему, если слова запроса есть в названии или тегах. Каша получает до −50% балла"),
     ("low_data_min_hits", "Цели оценки", "«Мало данных», если успешных роликов меньше", "int", 1, 50, ""),
     ("custom_topics", "Автопоиск", "Свои темы, по одной на строку", "lines", None, None,
      "Автопоиск возьмёт их раньше категорий каталога. Можно писать по-русски: на язык рынка тема переведётся сама"),
@@ -218,7 +222,7 @@ _ATTRS = {"min_video_age_days": "MIN_VIDEO_AGE_DAYS", "evergreen_age_days": "EVE
           "new_channel_days": "NEW_CHANNEL_DAYS", "ratio_target": "RATIO_TARGET",
           "new_channels_target": "NEW_CHANNELS_TARGET", "big_share_max": "BIG_SHARE_MAX",
           "saturation_low": "SATURATION_LOW", "saturation_high": "SATURATION_HIGH",
-          "low_data_min_hits": "LOW_DATA_MIN_HITS", "vault_min_score": "VAULT_MIN_SCORE",
+          "low_data_min_hits": "LOW_DATA_MIN_HITS", "topic_match_min": "TOPIC_MATCH_MIN", "vault_min_score": "VAULT_MIN_SCORE",
           "retention_pct": "RETENTION_PCT", "claude_model": "CLAUDE_MODEL"}
 
 
