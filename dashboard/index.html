@@ -130,6 +130,12 @@ a { color: var(--accent); }
 .tabs button { background: transparent; color: var(--muted); border-radius: 6px 6px 0 0; padding: 8px 12px; font-weight: 600; }
 .tabs button.on { color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
 .pane { display: none; } .pane.on { display: block; }
+.where { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; margin-top: 12px; }
+.where .mk { border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+.where .mk h3 { margin: 0 0 8px; font-size: 14px; }
+.where .pick { display: flex; gap: 8px; align-items: flex-start; padding: 6px 0; border-top: 1px solid var(--line); cursor: pointer; }
+.where .pick:hover { background: var(--accent-soft); }
+.where .pick .sub { display: block; color: var(--muted); font-size: 12px; }
 .cmp { margin: 0 0 20px; }
 .cmp h3 { margin: 0 0 8px; font-size: 14px; }
 .cmp td.top { font-weight: 700; color: var(--good, #1a7f37); }
@@ -259,6 +265,7 @@ a { color: var(--accent); }
     <div class="tabs" id="viewTabs">
       <button data-view="all" class="on">Все ниши</button>
       <button data-view="vault">Хранилище</button>
+      <button data-view="where">Куда идти</button>
       <button data-view="compare">Сравнение языков</button>
     </div>
     <div class="pane on" id="view-all">
@@ -316,6 +323,16 @@ a { color: var(--accent); }
         <span class="count" id="vaultCount"></span>
       </div>
       <div id="vaultList"></div>
+    </div>
+    <div class="pane" id="view-where">
+      <p class="hint">По каждому языку три лучшие <b>темы</b> (без форматов и каши, только с полным анализом и достаточными данными),
+        отсортированные по итогу с учётом денег: балл × (0,5 + 0,5 × RPM рынка / лучший RPM). Ниже лучший рабочий формат языка.
+        Клик открывает нишу.</p>
+      <div class="claude-box"><b>Стратегия по рынкам</b>
+        <button id="marketsRep">Стратегия по рынкам через Claude</button>
+        <button class="ghost" id="marketsOpen" style="display:none">Открыть последнюю</button>
+        <span class="hint" style="margin:0" id="marketsHint">Claude прочитает все найденные ниши и по каждому языку скажет: идти или нет, с какой ниши начать и что сделать в первую неделю. ≈ $0,2–0,5.</span></div>
+      <div class="where" id="whereList"></div>
     </div>
     <div class="pane" id="view-compare">
       <p class="hint">Одна тема на разных рынках. Сравнение запускается кнопкой «Сравнить на других языках» в карточке ниши
@@ -660,6 +677,7 @@ function render() {
     return main + (openKey === key(r) ? detail(r) : "");
   }).join("");
   renderCompare();
+  renderWhere();
   if (vault.items) renderVault();   // связи языков в хранилище берутся из свежих результатов
 }
 
@@ -724,6 +742,41 @@ function renderCompare() {
       <tbody>${rows}</tbody></table></div></div>`;
   }).join("");
 }
+// --- куда идти: лучшие темы каждого языка с учётом денег ---
+function renderWhere() {
+  const rpmOf = r => (r.income && r.income.rpm) || 0;
+  const maxRpm = Math.max(0, ...results.map(rpmOf));
+  const solid = r => (r.depth || "full") === "full" && !r.low_data && nicheKind(r) === "topic";
+  const weak = r => { const [k, n] = CRIT.slice().sort((a, b) => sc(r, a[0]) - sc(r, b[0]))[0]; return `${n.toLowerCase()} ${sc(r, k)}`; };
+  const pick = (r, i) => `<div class="pick" data-where="${esc(key(r))}">
+      <span class="score" style="background:${color(moneyScore(r, maxRpm))}" title="Итог с учётом денег, балл ${r.score}">${moneyScore(r, maxRpm)}</span>
+      <div><b>${i === 0 ? "★ " : ""}${esc(r.query)}</b>
+      <span class="sub">балл ${r.score}${catName(r) ? ` · ${esc(catName(r))}` : ""} · ${r.metrics.median_ratio_small ?? "–"}× · новых ${r.metrics.new_successful ?? 0} · миллионников ${r.metrics.big_share ?? 0}%${r.income ? ` · 1M ≈ $${r.income.per_views["1000000"].join("–")}` : ""}</span>
+      <span class="sub">слабое место: ${esc(weak(r))}</span></div></div>`;
+  const langs = Object.keys(cfg.languages).filter(l => results.some(r => r.lang === l));
+  $("whereList").innerHTML = langs.length ? langs.map(l => {
+    const rs = results.filter(r => r.lang === l);
+    const top = rs.filter(solid).sort((a, b) => moneyScore(b, maxRpm) - moneyScore(a, maxRpm)).slice(0, 3);
+    const raw = rs.filter(r => nicheKind(r) === "topic" && !solid(r)).sort((a, b) => b.score - a.score).slice(0, 2);
+    const fmtBest = rs.filter(r => nicheKind(r) === "format" && (r.depth || "full") === "full").sort((a, b) => b.score - a.score)[0];
+    const rpm = rs.find(r => r.income) ? rs.find(r => r.income).income.rpm : null;
+    return `<div class="mk"><h3><span class="lang">${l}</span> ${esc(cfg.languages[l])}${rpm != null ? ` <span class="hint" style="margin:0;font-weight:400">· RPM ≈ $${rpm}</span>` : ""}</h3>
+      ${top.length ? top.map(pick).join("") : `<p class="hint">Нет темы с полным анализом и достаточными данными.${raw.length ? " Кандидаты для полного анализа:" : " Запустите автопоиск с этим языком."}</p>`}
+      ${!top.length && raw.length ? raw.map(r => `<div class="pick" data-where="${esc(key(r))}"><span class="score" style="background:${color(r.score)}">${r.score}</span><div><b>${esc(r.query)}</b><span class="sub">${r.depth === "scout" ? "только разведка" : "мало данных"}</span></div></div>`).join("") : ""}
+      ${fmtBest ? `<p class="hint" style="margin:8px 0 0">Рабочий формат: <a href="#" data-where="${esc(key(fmtBest))}">${esc(fmtBest.query)}</a> (балл ${fmtBest.score}). Примените его к лучшей теме.</p>` : ""}
+      <p class="hint" style="margin:6px 0 0">Проверено ниш: ${rs.length}.</p></div>`;
+  }).join("") : '<p class="empty">Пока нет ниш. Запустите автопоиск.</p>';
+  const rep = reportsByKey.markets;
+  $("marketsOpen").style.display = rep ? "" : "none";
+  if (rep) $("marketsHint").textContent = `Последняя стратегия от ${rep.created_at.slice(0, 10)}, ≈ $${rep.cost_usd}. Её стоит обновить после новых запусков автопоиска.`;
+}
+$("whereList").addEventListener("click", e => {
+  const w = e.target.closest("[data-where]");
+  if (w) { e.preventDefault(); openNiche(w.dataset.where); }
+});
+$("marketsRep").addEventListener("click", () => startReport({ kind: "markets" }));
+$("marketsOpen").addEventListener("click", () => openReport("markets"));
+
 function showCompare(topic) {
   document.querySelector('#viewTabs [data-view="compare"]').click();
   const i = compareGroups().findIndex(([t]) => t === topic);
@@ -934,6 +987,7 @@ async function pollReport(initial) {
   if (s.state === "running") {
     const sec = Math.round((Date.now() - Date.parse(s.started_at)) / 1000);
     showStatus(s.kind === "topics" ? `Claude подбирает новые темы для автопоиска… ${sec} с. Обычно это 1–3 минуты.`
+      : s.kind === "markets" ? `Claude составляет стратегию по рынкам… ${sec} с. Обычно это 1–3 минуты.`
       : `Claude разбирает ${s.kind === "niche" ? "нишу" : "канал"} <b>${esc(s.title)}</b>… ${sec} с. Обычно это 1–4 минуты.`);
     repPolling = setTimeout(() => pollReport(), 2000);
     return;
@@ -961,10 +1015,16 @@ function openReport(k) {
   const rep = reportsByKey[k];
   if (!rep) return;
   const d = rep.data || {};
-  const head = `<h2>${rep.kind === "niche" ? "Разбор ниши" : "Разбор конкурента"}: ${esc(rep.title)}</h2>
+  const head = `<h2>${rep.kind === "niche" ? "Разбор ниши: " + esc(rep.title) : rep.kind === "markets" ? "Куда идти на каждом языке" : "Разбор конкурента: " + esc(rep.title)}</h2>
     <div class="hint">${esc(rep.model)} · ${rep.created_at.slice(0, 16).replace("T", " ")} · ≈ $${rep.cost_usd}${rep.youtube_units ? ` · ${rep.youtube_units} ед. квоты YouTube` : ""}</div>`;
   let body = "";
-  if (rep.kind === "niche") {
+  if (rep.kind === "markets") {
+    body = `<p>${esc(d.summary)}</p>${d.order ? `<p><b>Порядок запуска:</b> ${esc(d.order)}</p>` : ""}
+      ${(d.markets || []).map(m => `<h3><span class="lang">${esc(m.lang)}</span> ${esc(cfg.languages[m.lang] || m.lang)} · ${esc(m.verdict)}</h3>
+        ${kv([["С чего начать", m.pick ? `${m.pick.query}. ${m.pick.why}` : ""], ["Запасные", (m.backups || []).map(b => `${b.query}: ${b.why}`).join(" · ")],
+              ["Формат", m.format_tip], ["Главный риск", m.risks]])}
+        ${(m.first_steps || []).length ? `<b>Первая неделя</b><ol>${li(m.first_steps)}</ol>` : ""}`).join("")}`;
+  } else if (rep.kind === "niche") {
     const inc = d.income || {};
     body = `<p><span class="big">${d.total ?? "–"}/10</span> перспективность ниши</p><p>${esc(d.summary)}</p>
       <h3>Критерии</h3><table><tr><th>Критерий</th><th>Оценка</th><th>Почему</th></tr>

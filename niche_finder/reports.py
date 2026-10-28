@@ -339,6 +339,67 @@ def make_topic_ideas(model, results):
             "model": served}
 
 
+MARKETS_SCHEMA = _obj({
+    "summary": S,
+    "order": S,
+    "markets": _arr(_obj({"lang": S, "verdict": S, "pick": _obj({"query": S, "why": S}),
+                          "backups": _arr(_obj({"query": S, "why": S})), "format_tip": S, "risks": S,
+                          "first_steps": _arr(S)})),
+})
+
+MARKETS_TASK = """Это все ниши, которые программа нашла и проверила, сгруппированные по рынкам (языкам). Человек не понимает,
+куда идти на каждом языке. Дай ему ясный ответ.
+
+Для каждого рынка из данных (поле markets, по элементу на рынок, lang — код языка):
+- verdict: одно из «идти», «можно попробовать», «пока рано» и коротко почему;
+- pick: одна лучшая ниша для старта на этом рынке (query — ровно как в данных) и почему именно она: балл, деньги, конкуренция,
+  молодые каналы, вечнозелёность, подходит ли под ИИ-производство;
+- backups: 2 запасные ниши из данных с пояснением;
+- format_tip: если в данных рынка есть рабочие форматы (kind=format), как применить лучший из них к выбранной нише; иначе пусто;
+- risks: главный риск выбора;
+- first_steps: 3 конкретных шага на первую неделю (на языке рынка — только названия роликов).
+
+Ниши с пометкой «мало данных» или после одной разведки не ставь в pick, если есть полностью проверенные; если на рынке
+только такие, verdict «пока рано» и скажи, что проверить. Учитывай RPM: при равных баллах дороже рынок важнее.
+В order скажи, в каком порядке запускать рынки, если человек потянет не все сразу, и почему. В summary — 2–3 предложения итога."""
+
+
+def markets_payload(results):
+    from .catalog import category_names
+    names = category_names()
+    out = {}
+    for lang in config.LANGUAGES:
+        rs = [r for r in results if r["lang"] == lang]
+        if not rs:
+            continue
+        def row(r):
+            m, inc = r.get("metrics", {}), r.get("income", {})
+            return {"query": r["query"], "балл": r.get("score"), "тип": r.get("kind", "topic"),
+                    "анализ": "разведка" if r.get("depth") == "scout" else "полный",
+                    "мало данных": bool(r.get("low_data")), "категория": names.get(r.get("category", ""), ""),
+                    "критерии": r.get("scores", {}), "просм/подп": m.get("median_ratio_small"),
+                    "новых успешных каналов": m.get("new_successful"), "миллионники %": m.get("big_share"),
+                    "роликов по теме": m.get("search_total"), "мес. до 1000 подп.": m.get("months_to_1k"),
+                    "про тему %": m.get("topic_match"), "частые слова": [w for w, _ in m.get("theme_words", [])[:5]],
+                    "RPM": inc.get("rpm"), "доход при 1M": inc.get("per_views", {}).get("1000000")}
+        topics = sorted((r for r in rs if r.get("kind", "topic") == "topic"), key=lambda r: -r.get("score", 0))
+        formats = sorted((r for r in rs if r.get("kind") == "format"), key=lambda r: -r.get("score", 0))
+        out[lang] = {"рынок": LANG_NAMES.get(lang, lang), "RPM рынка": config.RPM.get(lang),
+                     "всего проверено": len(rs), "темы": [row(r) for r in topics[:15]],
+                     "рабочие форматы": [row(r) for r in formats[:5]]}
+    if not out:
+        raise ReportError("Пока нет найденных ниш. Сначала запустите автопоиск.")
+    return out
+
+
+def make_markets_report(model, results):
+    data, tokens, cost, served = _ask(model, MARKETS_TASK, markets_payload(results), MARKETS_SCHEMA)
+    report = {"kind": "markets", "title": "куда идти на каждом языке", "model": served, "created_at": _now(),
+              "cost_usd": cost, "tokens": tokens, "data": data}
+    _save_report("markets", report)
+    return report
+
+
 def make_niche_report(result, model):
     data, tokens, cost, served = _ask(model, NICHE_TASK, niche_payload(result), NICHE_SCHEMA)
     report = {"kind": "niche", "title": f"{result['query']} [{result['lang']}]", "query": result["query"],
@@ -379,6 +440,9 @@ def start(body, results):
             raise ReportError("Неверный канал")
         title, key = body.get("title") or cid, channel_key(cid)
         job = lambda: make_channel_report(cid, model, niche=body.get("niche"))
+    elif kind == "markets":
+        title, key = "куда идти на каждом языке", "markets"
+        job = lambda: make_markets_report(model, results)
     elif kind == "topics":
         title, key = "новые темы для автопоиска", "topics"
         job = lambda: make_topic_ideas(model, results)
