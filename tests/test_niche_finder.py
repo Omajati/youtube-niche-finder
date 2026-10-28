@@ -402,6 +402,8 @@ class PipelineTest(unittest.TestCase):
             self.assertEqual(content[0]["type"], "image")                # обложки идут картинками
             self.assertIn("great story", content[-1]["text"])            # комментарии зрителей в данных
             self.assertEqual(sent["output_config"]["format"]["type"], "json_schema")
+            self.assertIn("с помощью ИИ", sent["system"])                  # Claude знает, что мы делаем ИИ-контент
+            self.assertIn("ai", reports.CHANNEL_SCHEMA["required"])
             self.assertIn("channel|UCabc", reports.load_reports())
 
             pipeline.run(["q"], ["en"], max_niches=1, client=FakeClient(self.tmp))
