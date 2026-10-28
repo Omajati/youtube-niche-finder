@@ -312,7 +312,9 @@ a { color: var(--accent); }
       <p class="hint">Одна тема на разных рынках. Сравнение запускается кнопкой «Сравнить на других языках» в карточке ниши
         (тема переводится и разбирается полностью на каждом рынке). Сюда же попадают переводы из поиска по запросу с галочкой «перевести».
         <b>Итог с учётом денег</b> = балл × (0,5 + 0,5 × RPM рынка / лучший RPM в группе): хорошая ниша на дешёвом рынке опускается ниже.
-        Лучшие значения в каждом столбце выделены, строка открывает нишу.</p>
+        Лучшие значения в каждом столбце выделены, строка открывает нишу. В «Критериях» красным отмечено, где рынок отстаёт от лучшего
+        на 25+, и написано, сколько баллов итога он на этом теряет. Цели «новые каналы» и «сильные малые каналы» учитывают размер рынка
+        (в «Настройках анализа»: EN 1, ES 0,6, DE 0,5, FR 0,5, RU 0,7).</p>
       <div id="compareList"></div>
     </div>
   </section>
@@ -649,7 +651,7 @@ function renderCompare() {
     ["Итог с учётом денег", null, 1],
     ["Вечнозел.", r => sc(r, "evergreen"), 1],
     ["Просм./подп.", r => r.metrics.median_ratio_small, 1, v => v != null ? v + "×" : "–"],
-    ["Новые успешные", r => r.metrics.new_successful ?? 0, 1, (v, r) => `${v} / ${r.metrics.new_channels ?? 0}`],
+    ["Новые успешные", r => r.metrics.new_successful ?? 0, 1, (v, r) => `${v} / ${r.metrics.new_channels ?? 0}${r.metrics.new_target ? ` <span class="hint" style="margin:0" title="Сколько новых успешных каналов нужно для максимума на этом рынке (с поправкой на размер рынка)">цель ${r.metrics.new_target}</span>` : ""}`],
     ["Миллионники", r => r.metrics.big_share ?? 0, -1, v => v + "%"],
     ["Роликов по теме", r => r.metrics.search_total, -1, v => v ? fmt(v) : "–"],
     ["До 1000 подп.", r => r.metrics.months_to_1k, -1, v => v != null ? `≈ ${v} мес.` : "–"],
@@ -660,6 +662,11 @@ function renderCompare() {
     const maxRpm = Math.max(0, ...rs.map(r => (r.income && r.income.rpm) || 0));
     const getters = cols.map(c => c[1] || (r => moneyScore(r, maxRpm)));
     rs = rs.slice().sort((a, b) => moneyScore(b, maxRpm) - moneyScore(a, maxRpm));
+    // где рынок теряет баллы: по каждому критерию лучший в группе и отставание остальных
+    const critBest = Object.fromEntries(CRIT.map(([k]) => [k, Math.max(...rs.map(r => sc(r, k)))]));
+    const critCell = r => `<div class="bars">${CRIT.map(([k, n]) => `<i title="${n}: ${sc(r, k)}${sc(r, k) < critBest[k] ? ` (лучший рынок ${critBest[k]})` : ""}"><span style="height:${Math.max(sc(r, k), 4)}%;${critBest[k] - sc(r, k) >= 25 ? "background:var(--bad)" : ""}"></span></i>`).join("")}</div>
+      ${(() => { const loss = CRIT.map(([k, n, w]) => [n, Math.round((critBest[k] - sc(r, k)) * weightPct(k) / 100)]).filter(x => x[1] >= 3).sort((a, b) => b[1] - a[1]).slice(0, 2);
+                 return loss.length ? `<div class="hint" style="margin:2px 0 0">теряет: ${loss.map(([n, d]) => `${esc(n.toLowerCase())} −${d}`).join(", ")}</div>` : ""; })()}`;
     const best = getters.map((g, i) => {
       const vals = rs.map(g).filter(v => v != null && !isNaN(v));
       // выделяем лучшее, только если рынки различаются
@@ -669,12 +676,13 @@ function renderCompare() {
     const rows = rs.map(r => `<tr class="item" data-cmp-key="${esc(key(r))}">
       <td><span class="lang">${r.lang}</span> ${esc(cfg.languages[r.lang] || "")}</td>
       <td class="q">${esc(r.query)}${r.depth === "scout" ? '<span class="scout">разведка</span>' : ""}${r.low_data ? '<span class="badge">мало данных</span>' : ""}</td>
+      <td>${critCell(r)}</td>
       ${getters.map((g, i) => {
         const v = g(r), shown = i === 0 || i === 1 ? `<span class="score" style="background:${color(v)}">${v}</span>` : (cols[i][3] ? cols[i][3](v, r) : (v ?? "–"));
         return `<td class="${best[i] != null && v === best[i] ? "top" : ""}">${shown}</td>`;
       }).join("")}</tr>`).join("");
     return `<div class="cmp"><h3>${esc(title)}</h3><div class="table-wrap"><table>
-      <thead><tr><th>Рынок</th><th>Запрос</th>${cols.map(c => `<th>${c[0]}</th>`).join("")}</tr></thead>
+      <thead><tr><th>Рынок</th><th>Запрос</th><th title="Просмотры ≫ подписчики · Новые · Конкуренция · Вечнозелёность · Стабильность · Формат. Красным: на 25+ хуже лучшего рынка">Критерии</th>${cols.map(c => `<th>${c[0]}</th>`).join("")}</tr></thead>
       <tbody>${rows}</tbody></table></div></div>`;
   }).join("");
 }

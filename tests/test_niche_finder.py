@@ -156,6 +156,21 @@ class ScoringTest(unittest.TestCase):
         self.assertEqual(inc["rpm"], round(config.RPM["en"] * 1.6, 2))
         self.assertLess(inc["per_views"]["100000"][0], inc["per_views"]["100000"][1])
 
+    def test_market_size_lowers_count_targets(self):
+        # два новых канала с успешными роликами: на EN (цель 3) это не максимум, на рынке вдвое меньше уже да
+        chs = [channel("n1", 3_000, 30), channel("n2", 3_000, 30)]
+        vids = [video("a", "n1", 50_000), video("b", "n2", 50_000)]
+        en = analyze("q", "en", vids, chs, now=NOW)
+        old = config.MARKET_SIZE["en"]
+        try:
+            config.MARKET_SIZE["en"] = 0.5
+            small = analyze("q", "en", vids, chs, now=NOW)
+        finally:
+            config.MARKET_SIZE["en"] = old
+        self.assertEqual((en["metrics"]["new_target"], small["metrics"]["new_target"]), (3, 1.5))
+        self.assertGreater(small["scores"]["new_channels"], en["scores"]["new_channels"])
+        self.assertGreater(small["scores"]["stability"], en["scores"]["stability"])
+
     def test_empty(self):
         self.assertEqual(analyze("q", "en", [], [], now=NOW)["score"], 0)
 

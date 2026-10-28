@@ -107,6 +107,13 @@ VAULT_MIN_SCORE = _int("VAULT_MIN_SCORE", 65)             # с таким бал
 # В России монетизация YouTube для местных каналов отключена с 2022 года: RPM русскоязычной аудитории низкий,
 # доход обычно идёт с интеграций и донатов (Boosty и т.п.)
 RPM = {"en": 6.0, "de": 5.0, "fr": 4.0, "es": 2.5, "ru": 0.7}
+# Размер рынка: цели в штуках («3 новых успешных канала», «5 сильных малых каналов») умножаются на него.
+# На немецком или французском YouTube каналов в любой теме меньше, чем на английском, и без поправки
+# небольшой рынок проигрывал бы просто из-за размера
+MARKET_SIZE = {"en": 1.0, "es": 0.6, "de": 0.5, "fr": 0.5, "ru": 0.7}
+# Меняется, когда меняется формула оценки: при запуске старые ниши пересчитываются из кэша
+SCORING_VERSION = 2
+SCORING_VERSION_FILE = DATA_DIR / "scoring_version"
 RETENTION_PCT = _int("RETENTION_PCT", 35)   # среднее удержание для оценки часов просмотра, %
 
 # Модели Claude для разборов: цена в долларах за миллион токенов (вход, выход)
@@ -167,6 +174,12 @@ SETTINGS_SPEC = [
     ("saturation_low", "Цели оценки", "Тема узкая, если роликов на YouTube до", "int", 10, 10_000_000, ""),
     ("saturation_high", "Цели оценки", "Тема массовая, если роликов от", "int", 100, 100_000_000, ""),
     ("low_data_min_hits", "Цели оценки", "«Мало данных», если успешных роликов меньше", "int", 1, 50, ""),
+    ("market_en", "Размер рынка", "Размер рынка EN", "float", 0.1, 3,
+     "Цели «новые каналы» и «сильные малые каналы» умножаются на это число. EN = 1"),
+    ("market_es", "Размер рынка", "Размер рынка ES", "float", 0.1, 3, ""),
+    ("market_de", "Размер рынка", "Размер рынка DE", "float", 0.1, 3, ""),
+    ("market_fr", "Размер рынка", "Размер рынка FR", "float", 0.1, 3, ""),
+    ("market_ru", "Размер рынка", "Размер рынка RU", "float", 0.1, 3, ""),
     ("weight_outlier", "Веса критериев", "Просмотры ≫ подписчики", "int", 0, 100, ""),
     ("weight_new_channels", "Веса критериев", "Новые каналы растут", "int", 0, 100, ""),
     ("weight_competition", "Веса критериев", "Мало конкурентов", "int", 0, 100, ""),
@@ -208,6 +221,8 @@ def _get_setting(key):
         return MIN_VIEWS[key[-2:]]
     if key.startswith("rpm_"):
         return RPM[key[-2:]]
+    if key.startswith("market_"):
+        return MARKET_SIZE[key[-2:]]
     if key.startswith("weight_"):
         return WEIGHTS[key[len("weight_"):]]
     if key == "search_durations":
@@ -225,6 +240,8 @@ def _set_setting(key, value):
         MIN_VIEWS[key[-2:]] = value
     elif key.startswith("rpm_"):
         RPM[key[-2:]] = value
+    elif key.startswith("market_"):
+        MARKET_SIZE[key[-2:]] = value
     elif key.startswith("weight_"):
         WEIGHTS[key[len("weight_"):]] = value
     elif key == "search_durations":

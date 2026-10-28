@@ -223,7 +223,11 @@ def analyze(query, lang, videos_raw, channels_raw, now=None, uploads=None, searc
     for v in videos:
         best_views[v["channel_id"]] = max(best_views[v["channel_id"]], v["views"])
     new_successful = [c for c in new_channels if best_views[c["id"]] >= min_views]
-    s_new = _clamp(len(new_successful) / config.NEW_CHANNELS_TARGET) * 0.8 + _clamp(len(new_channels) / 5) * 0.2
+    # цели в штуках с поправкой на размер рынка: на DE новых каналов в теме просто меньше, чем на EN
+    market = config.MARKET_SIZE.get(lang, 1.0)
+    new_target = max(1.0, config.NEW_CHANNELS_TARGET * market)
+    channels_target = max(1.0, 5 * market)
+    s_new = _clamp(len(new_successful) / new_target) * 0.8 + _clamp(len(new_channels) / channels_target) * 0.2
 
     # 3. Конкуренция: доля каналов-миллионников (40% и больше -> 0) и насыщенность темы:
     #    сколько роликов по запросу нашёл YouTube за полгода (до 2 тыс. -> 1, от 200 тыс. -> 0)
@@ -247,7 +251,7 @@ def analyze(query, lang, videos_raw, channels_raw, now=None, uploads=None, searc
     total_views = sum(v["views"] for v in videos) or 1
     top_share = max(v["views"] for v in videos) / total_views
     strong_small_channels = {v["channel_id"] for v in hits if v["ratio"] >= 1}
-    s_stability = 0.5 * (1 - top_share) + 0.5 * _clamp(len(strong_small_channels) / 5)
+    s_stability = 0.5 * (1 - top_share) + 0.5 * _clamp(len(strong_small_channels) / channels_target)
 
     # 5. Формат: длина успешных роликов и частота загрузок их каналов
     successful = [v for v in hits if v["ratio"] >= 1] or hits or small or videos
@@ -303,6 +307,8 @@ def analyze(query, lang, videos_raw, channels_raw, now=None, uploads=None, searc
             "big_share": round(big_share * 100),
             "new_channels": len(new_channels),
             "new_successful": len(new_successful),
+            "new_target": round(new_target, 1),       # сколько новых успешных каналов нужно для максимума на этом рынке
+            "market_size": market,
             "avg_length_min": round(mean(v["duration_min"] for v in videos), 1),
             "avg_length_successful_min": round(avg_len, 1),
             "uploads_per_week_successful": round(uploads_week, 2),
