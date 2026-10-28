@@ -441,6 +441,17 @@ class PipelineTest(unittest.TestCase):
             self.assertEqual((out["added"], out["names"]), (1, ["История шахмат"]))
             self.assertIn("История шахмат", catalog.category_names().values())
             self.assertIn("Космос", sent["messages"][0]["content"][-1]["text"])   # Claude видит, что уже есть
+
+            # куда идти: Claude получает ниши по рынкам, отчёт сохраняется под ключом markets
+            answer[0] = {"summary": "s", "order": "en", "markets": [{"lang": "en", "verdict": "идти",
+                         "pick": {"query": "q", "why": "w"}, "backups": [], "format_tip": "", "risks": "r",
+                         "first_steps": ["a"]}]}
+            rep = reports.make_markets_report("claude-opus-5-5", pipeline.load_results())
+            self.assertEqual(rep["data"]["markets"][0]["pick"]["query"], "q")
+            self.assertIn("markets", reports.load_reports())
+            self.assertIn("рабочие форматы", sent["messages"][0]["content"][-1]["text"])
+            with self.assertRaises(reports.ReportError):
+                reports.markets_payload([])
             with self.assertRaises(reports.ReportError):
                 config.ANTHROPIC_API_KEY = ""
                 reports.start({"kind": "niche", "query": "q", "lang": "en"}, pipeline.load_results())
