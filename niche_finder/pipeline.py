@@ -241,8 +241,10 @@ def _finish(status, client, report):
     return status
 
 
-def run(queries, langs, expand=0, max_niches=10, progress=None, client=None, translate=False):
-    """Анализирует ниши по очереди. progress(dict) получает статус после каждого шага."""
+def run(queries, langs, expand=0, max_niches=10, progress=None, client=None, translate=False, parents=None):
+    """Анализирует ниши по очереди. progress(dict) получает статус после каждого шага.
+    parents: {запрос: родительская ниша} для подниш, добавленных из карточки ниши."""
+    parents = {k.lower().strip(): v for k, v in (parents or {}).items()}
     client = client or YouTubeClient()
     report = progress or (lambda s: None)
     status = _new_status()
@@ -253,6 +255,8 @@ def run(queries, langs, expand=0, max_niches=10, progress=None, client=None, tra
     report(status)
     for query, lang in plan:
         meta = {"source": "manual"}
+        if parents.get(query.lower().strip()):
+            meta["parent"] = parents[query.lower().strip()]
         if (query, lang) in topics and len(langs) > 1:   # переводы одной темы попадают в сравнение языков
             orig = topics[(query, lang)]
             meta.update(topic=f"q|{orig.lower().strip()}", topic_title=orig)
@@ -396,6 +400,12 @@ def run_auto(langs, budget=3000, progress=None, client=None):
     _write(config.AUTO_FILE, state)
     status["queue"] = len(state["queue"])
     return _finish(status, client, report)
+
+
+def subniche_queue():
+    """Подниши, которые ждут разведки в следующих запусках автопоиска."""
+    return [{"query": q["query"], "lang": q["lang"], "parent": q.get("parent", ""), "priority": q.get("priority", 0)}
+            for q in load_auto_state()["queue"]]
 
 
 def auto_summary():
