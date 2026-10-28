@@ -1,5 +1,5 @@
 {
- "version": 15,
- "notes": "85 категорий автопоиска, свои темы, новые темы через Claude, отсев почти одинаковых запросов",
+ "version": 16,
+ "notes": "Разборы Claude учитывают ИИ-производство: блок «где работает ИИ-контент»",
  "app_zip": "https://raw.githubusercontent.com/Omajati/youtube-niche-finder/main/release/NicheFinder.zip"
 }

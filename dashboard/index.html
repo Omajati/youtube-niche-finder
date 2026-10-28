@@ -894,7 +894,7 @@ function claudeBox(r, rep) {
     <select id="repModel" title="Модель для разборов в этой карточке">${models}</select>
     ${rep ? `<button data-open-rep="niche|${esc(vkey(r))}">Открыть разбор ниши</button>` : ""}
     <button class="${rep ? "ghost" : ""}" data-nrep="${esc(key(r))}">${rep ? "Разобрать заново" : "Разбор ниши"}</button>
-    <span class="hint" style="margin:0">${rep ? `разбор от ${rep.created_at.slice(0, 10)}, ≈ $${rep.cost_usd}` : "оценка 1–10 по 7 критериям, риски, свободный угол, 15 тем"}${c.configured ? "" : " · сначала впишите ключ Claude в «Ключи API»"}.
+    <span class="hint" style="margin:0">${rep ? `разбор от ${rep.created_at.slice(0, 10)}, ≈ $${rep.cost_usd}` : "оценка 1–10 по 7 критериям, риски, свободный угол, 15 тем, где работает ИИ-контент"}${c.configured ? "" : " · сначала впишите ключ Claude в «Ключи API»"}.
     Конкурента можно разобрать кнопкой «Разбор» в таблице каналов.</span></div>`;
 }
 async function startReport(body) {
@@ -949,6 +949,8 @@ function openReport(k) {
       <h3>Доход</h3>${kv([["RPM", inc.rpm_comment], ["100 000 просмотров в месяц", inc.at_100k], ["500 000", inc.at_500k], ["1 000 000", inc.at_1m], ["Дополнительная монетизация", inc.extra_monetization]])}
       <h3>Три главных риска</h3><ol>${li(d.risks)}</ol>
       <h3>Свободный угол</h3><p>${esc(d.angle)}</p>
+      ${d.ai ? `<h3>ИИ-производство: ${d.ai.fit ?? "–"}/10</h3>${kv([["Где ИИ-ролики уже работают", d.ai.where_it_works], ["Как лучше делать", d.ai.production], ["Чтобы не попасть под «неоригинальный контент»", d.ai.policy]])}
+        ${(d.ai.examples || []).length ? `<b>Примеры из выдачи</b><ul>${li(d.ai.examples)}</ul>` : ""}` : ""}
       <h3>15 тем для первых роликов</h3><ol>${(d.ideas || []).map(i => `<li><b>${esc(i.title)}</b> · ${esc(i.why)}</li>`).join("")}</ol>`;
   } else {
     const f = d.format || {}, s = d.success || {}, t = d.thumbnails || {}, a = d.audience || {}, l = d.launch || {}, v = d.verdict || {};
@@ -960,7 +962,8 @@ function openReport(k) {
       <h3>5. Слабые стороны и возможности</h3><ol>${(d.weaknesses || []).map(w => `<li><b>${esc(w.issue)}</b><br>${esc(w.how_to_use)}</li>`).join("")}</ol>
       <h3>6. Запуск своего канала</h3>${kv([["Формат", l.format], ["Превью", l.thumbnail_tips], ["Продолжительность", l.duration]])}<b>10 идей для первых видео</b><ol>${li(l.ideas)}</ol>
       <h3>7. Вердикт</h3>${kv([["Почему такая оценка", v.reasoning], ["Сильные стороны конкурента", v.competitor_strengths], ["Насколько сложно соперничать", v.difficulty]])}
-      <h3>Главное конкурентное преимущество</h3><p>${esc(d.main_advantage)}</p>`;
+      <h3>Главное конкурентное преимущество</h3><p>${esc(d.main_advantage)}</p>
+      ${d.ai ? `<h3>8. ИИ</h3>${kv([["Похож на ИИ-канал", d.ai.looks_ai], ["Признаки", d.ai.evidence], ["Что у него работает", d.ai.what_works], ["Как сделать с ИИ лучше", d.ai.how_to_do_better]])}` : ""}`;
   }
   $("reportBody").innerHTML = head + body;
   $("report").classList.add("open");
