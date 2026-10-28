@@ -1,5 +1,5 @@
 {
- "version": 10,
- "notes": "Сравнение одной ниши на разных языках: кнопка в карточке ниши и вкладка «Сравнение языков» с баллами, деньгами и итогом",
+ "version": 11,
+ "notes": "Хранилище: фильтр по языку и связь одной темы на разных языках",
  "app_zip": "https://raw.githubusercontent.com/Omajati/youtube-niche-finder/main/release/NicheFinder.zip"
 }

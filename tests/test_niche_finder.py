@@ -239,6 +239,10 @@ class PipelineTest(unittest.TestCase):
         # пересчёт по новым настройкам группу не теряет
         pipeline.recheck_cached(cache=Cache(self.tmp / "cache"))
         self.assertEqual({r["topic"] for r in pipeline.load_results()}, {"en|lost"})
+        # в хранилище каждый язык лежит отдельно, но с общей темой
+        pipeline.vault_add_by_key("Lost", "en")
+        pipeline.vault_add_by_key("perdidos", "es")
+        self.assertEqual({(v["lang"], v["topic"]) for v in pipeline.load_vault()}, {("en", "en|lost"), ("es", "en|lost")})
 
     def test_manual_translate_links_topic(self):
         pipeline.run(["lost"], ["es", "de"], max_niches=5, client=FakeClient(self.tmp), translate=True)

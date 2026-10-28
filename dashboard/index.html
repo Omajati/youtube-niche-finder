@@ -299,7 +299,11 @@ a { color: var(--accent); }
     <div class="pane" id="view-vault">
       <p class="hint" id="vaultHint"></p>
       <div class="toolbar">
+        <select id="vaultLang"><option value="">Все языки</option></select>
         <select id="vaultStatus"><option value="">Все статусы</option></select>
+        <label style="margin:0;font-weight:400;display:inline-flex;gap:6px;align-items:center">
+          <input type="checkbox" id="vaultMulti"> только темы на нескольких языках
+        </label>
         <span class="count" id="vaultCount"></span>
       </div>
       <div id="vaultList"></div>
@@ -419,13 +423,25 @@ async function loadVault() {
   const sel = $("vaultStatus"), cur = sel.value;
   sel.innerHTML = `<option value="">Все статусы</option>` + vault.statuses.map(s => `<option>${esc(s)}</option>`).join("");
   sel.value = cur;
+  const ls = $("vaultLang"), lcur = ls.value, counts = {};
+  vault.items.forEach(v => counts[v.lang] = (counts[v.lang] || 0) + 1);
+  ls.innerHTML = `<option value="">Все языки</option>` + Object.entries(cfg.languages)
+    .map(([c, n]) => `<option value="${c}">${esc(n)} (${counts[c] || 0})</option>`).join("");
+  ls.value = lcur;
   $("vaultHint").textContent = `Сюда сами попадают ниши с полным анализом и баллом от ${vault.min_score}. Добавить любую можно кнопкой «★ В хранилище» в её карточке.`;
   document.querySelector('#viewTabs [data-view="vault"]').textContent = `Хранилище (${vault.items.length})`;
   renderVault();
 }
+// та же тема на других языках: по общему topic из сравнения языков или перевода запроса
+const vaultTopic = v => v.topic || (results.find(r => vkey(r) === v.key) || {}).topic || "";
+function vaultSiblings(v) {
+  const t = vaultTopic(v);
+  return t ? results.filter(r => r.topic === t && r.lang !== v.lang) : [];
+}
 function renderVault() {
-  const st = $("vaultStatus").value;
-  const items = vault.items.filter(v => !st || v.status === st).sort((a, b) => b.score - a.score);
+  const st = $("vaultStatus").value, lang = $("vaultLang").value, multi = $("vaultMulti").checked;
+  const items = vault.items.filter(v => (!st || v.status === st) && (!lang || v.lang === lang)
+    && (!multi || vaultSiblings(v).length)).sort((a, b) => b.score - a.score);
   $("vaultCount").textContent = vault.items.length ? `${items.length} из ${vault.items.length}` : "";
   $("vaultList").innerHTML = items.length ? items.map(v => {
     const m = v.metrics || {}, s = v.scores || {};
@@ -437,11 +453,23 @@ function renderVault() {
         <button class="ghost" data-vremove>Убрать</button></div>
       <div class="facts">Вечнозелёность ${s.evergreen ?? "–"} · просм./подп. ${m.median_ratio_small ?? "–"}× · новых каналов с просмотрами ${m.new_successful ?? 0} · миллионников ${m.big_share ?? 0}% · длина ${m.avg_length_successful_min ?? "–"} мин · ${v.added_by === "auto" ? "добавлено автоматически" : "добавлено вручную"} ${v.added_at.slice(0, 10)}</div>
       ${vids ? `<div class="facts">${vids}</div>` : ""}
+      ${siblingsLine(v)}
       <textarea data-vnote placeholder="Заметки: идеи роликов, формат, чем отличаться от конкурентов">${esc(v.note)}</textarea>
     </div>`;
   }).join("") : '<p class="empty">Пока пусто. Запустите автопоиск: подходящие ниши появятся здесь сами.</p>';
 }
+function siblingsLine(v) {
+  const sib = vaultSiblings(v).sort((a, b) => b.score - a.score);
+  if (!sib.length) return "";
+  const chips = sib.map(r => vault.items.some(x => x.key === vkey(r))
+    ? `<button class="chip" data-vgo="${esc(r.lang)}" title="Уже в хранилище, показать этот язык">★ ${r.lang.toUpperCase()} · ${r.score} · ${esc(r.query)}</button>`
+    : `<button class="chip" data-vsib="${esc(key(r))}" title="Положить в хранилище и этот язык">+ ${r.lang.toUpperCase()} · ${r.score} · ${esc(r.query)}</button>`).join("");
+  return `<div class="facts">Эта тема на других языках: ${chips}
+    <button class="ghost mini" data-vcmp="${esc(vaultTopic(v))}">Сравнение языков</button></div>`;
+}
 $("vaultStatus").addEventListener("change", renderVault);
+$("vaultLang").addEventListener("change", renderVault);
+$("vaultMulti").addEventListener("change", renderVault);
 $("vaultList").addEventListener("change", async e => {
   const item = e.target.closest("[data-vkey]");
   if (!item) return;
@@ -452,6 +480,16 @@ $("vaultList").addEventListener("change", async e => {
   if (v) { if (e.target.matches("[data-vstatus]")) v.status = e.target.value; else v.note = e.target.value; }
 });
 $("vaultList").addEventListener("click", async e => {
+  const sib = e.target.closest("[data-vsib]");
+  if (sib) {
+    const r = results.find(x => key(x) === sib.dataset.vsib);
+    await fetch("/api/vault/add", { method: "POST", body: JSON.stringify({ query: r.query, lang: r.lang }) });
+    await loadVault(); return render();
+  }
+  const go = e.target.closest("[data-vgo]");
+  if (go) { $("vaultLang").value = go.dataset.vgo; return renderVault(); }
+  const cmp = e.target.closest("[data-vcmp]");
+  if (cmp) return showCompare(cmp.dataset.vcmp);
   if (!e.target.matches("[data-vremove]")) return;
   const k = e.target.closest("[data-vkey]").dataset.vkey;
   if (!confirm("Убрать нишу из хранилища?")) return;
@@ -582,6 +620,7 @@ function render() {
     return main + (openKey === key(r) ? detail(r) : "");
   }).join("");
   renderCompare();
+  if (vault.items) renderVault();   // связи языков в хранилище берутся из свежих результатов
 }
 
 // --- сравнение одной темы на разных языках ---
