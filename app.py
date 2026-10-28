@@ -199,7 +199,23 @@ def port_busy():
         return s.connect_ex(("127.0.0.1", config.PORT)) == 0
 
 
+def recheck_if_scoring_changed():
+    """Новая версия поменяла формулу оценки: пересчитываем найденные ниши из кэша, квота не тратится."""
+    f = config.SCORING_VERSION_FILE
+    try:
+        old = int(f.read_text().strip())
+    except (OSError, ValueError):
+        old = 0
+    if old == config.SCORING_VERSION:
+        return
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(str(config.SCORING_VERSION))
+    if pipeline.load_results():
+        start_run({"mode": "recheck"})
+
+
 def serve():
+    recheck_if_scoring_changed()
     ThreadingHTTPServer(("127.0.0.1", config.PORT), Handler).serve_forever()
 
 
