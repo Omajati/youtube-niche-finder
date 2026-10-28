@@ -24,6 +24,8 @@ body { margin: 0; background: var(--bg); color: var(--text);
 header { padding: 18px 24px 8px; display: flex; gap: 16px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; }
 .top-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .top-actions .ver { color: var(--muted); font-size: 12px; }
+.top-actions .spend { color: var(--muted); font-size: 12px; border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; white-space: nowrap; }
+.top-actions .spend b { color: var(--text); }
 button.update { background: var(--good); }
 .title-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
 .title-row h1 { margin: 0; }
@@ -152,6 +154,7 @@ a { color: var(--accent); }
     <div class="sub" id="criteria">Длинные видео, малые каналы, без миллионников</div>
   </div>
   <div class="top-actions">
+    <span class="spend" id="spend" title="Сколько ушло на разборы Claude: считается по токенам каждого ответа и ценам модели. Точную сумму видно в console.anthropic.com"></span>
     <button class="update" id="updateBtn" style="display:none">Обновить</button>
     <button class="ghost" id="anSettingsBtn">Настройки анализа</button>
     <button class="ghost" id="settingsBtn">Ключи API</button>
@@ -839,6 +842,14 @@ $("langs").addEventListener("change", updateEstimate);
 let reportsByKey = {}, repPolling = null;
 async function loadReports() {
   try { reportsByKey = await (await fetch("/api/reports")).json(); } catch (e) { reportsByKey = {}; }
+  loadSpend();
+}
+const MONTHS = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"];
+async function loadSpend() {
+  let s;
+  try { s = await (await fetch("/api/claude/spend")).json(); } catch (e) { return; }
+  const usd = v => "$" + v.toFixed(2);
+  $("spend").innerHTML = `Claude: <b>${usd(s.total)}</b> всего · ${usd(s.month)} за ${MONTHS[new Date().getMonth()]} · разборов ${s.count}`;
 }
 function claudeBox(r, rep) {
   const c = cfg.claude || {};
@@ -868,7 +879,7 @@ async function pollReport(initial) {
     return;
   }
   if (initial === true) { lastShownReport = s.key; return; }   // при открытии программы старый результат не показываем
-  if (s.state === "error") return showStatus(esc(s.error), true);
+  if (s.state === "error") { loadSpend(); return showStatus(esc(s.error), true); }
   if (s.state === "finished" && s.key !== lastShownReport) {
     lastShownReport = s.key;
     showStatus(`Разбор готов, стоил ≈ $${s.cost_usd}.`);

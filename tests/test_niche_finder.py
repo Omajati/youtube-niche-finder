@@ -343,8 +343,9 @@ class PipelineTest(unittest.TestCase):
 
     def test_reports_collect_data_and_parse_claude_answer(self):
         from niche_finder import reports
-        orig = (config.REPORTS_FILE, config.ANTHROPIC_API_KEY, reports._client)
+        orig = (config.REPORTS_FILE, config.SPEND_FILE, config.ANTHROPIC_API_KEY, reports._client)
         config.REPORTS_FILE = self.tmp / "reports.json"
+        config.SPEND_FILE = self.tmp / "spend.json"
         config.ANTHROPIC_API_KEY = "test"
         sent = {}
 
@@ -382,11 +383,13 @@ class PipelineTest(unittest.TestCase):
             rep = reports.make_niche_report(pipeline.load_results()[0], "claude-opus-5-5")
             self.assertEqual(rep["cost_usd"], 6.0)
             self.assertIn("успешные ролики малых каналов", sent["messages"][0]["content"][-1]["text"])
+            spend = reports.spend_summary()                               # счётчик расходов: оба разбора
+            self.assertEqual((spend["total"], spend["month"], spend["count"]), (9.0, 9.0, 2))
             with self.assertRaises(reports.ReportError):
                 config.ANTHROPIC_API_KEY = ""
                 reports.start({"kind": "niche", "query": "q", "lang": "en"}, pipeline.load_results())
         finally:
-            config.REPORTS_FILE, config.ANTHROPIC_API_KEY, reports._client = orig
+            config.REPORTS_FILE, config.SPEND_FILE, config.ANTHROPIC_API_KEY, reports._client = orig
 
     def test_all_keys_exhausted(self):
         client = FakeClient(self.tmp)
