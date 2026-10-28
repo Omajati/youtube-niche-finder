@@ -27,6 +27,7 @@ def start_run(body):
     expand = max(0, min(int(body.get("expand", 0)), 10))
     max_niches = max(1, min(int(body.get("max_niches", 10)), 50))
     translate = bool(body.get("translate"))
+    parents = {str(k): str(v) for k, v in (body.get("parents") or {}).items()}
     auto = body.get("mode") == "auto"
     recheck = body.get("mode") == "recheck"
     compare = body.get("mode") == "compare"
@@ -46,7 +47,8 @@ def start_run(body):
             elif auto:
                 pipeline.run_auto(langs, budget, progress=progress)
             else:
-                pipeline.run(queries, langs, expand, max_niches, progress=progress, translate=translate)
+                pipeline.run(queries, langs, expand, max_niches, progress=progress, translate=translate,
+                             parents=parents)
         except Exception as e:
             run_status.update(state="error", errors=[str(e)])
         finally:
@@ -91,6 +93,8 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/vault":
             self._json({"items": pipeline.load_vault(), "statuses": pipeline.VAULT_STATUSES,
                         "min_score": config.VAULT_MIN_SCORE})
+        elif self.path == "/api/auto/queue":
+            self._json(pipeline.subniche_queue())
         elif self.path == "/api/claude/spend":
             self._json(reports.spend_summary())
         elif self.path == "/api/reports":

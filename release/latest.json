@@ -1,5 +1,5 @@
 {
- "version": 13,
- "notes": "Счётчик расходов на Claude справа сверху",
+ "version": 14,
+ "notes": "Дерево подниш: от какой ниши пошла подниша, её подниши с баллами и очередь",
  "app_zip": "https://raw.githubusercontent.com/Omajati/youtube-niche-finder/main/release/NicheFinder.zip"
 }

@@ -259,6 +259,11 @@ class PipelineTest(unittest.TestCase):
         pipeline.vault_add_by_key("perdidos", "es")
         self.assertEqual({(v["lang"], v["topic"]) for v in pipeline.load_vault()}, {("en", "en|lost"), ("es", "en|lost")})
 
+    def test_manual_subniche_keeps_parent(self):
+        pipeline.run(["q one"], ["en"], max_niches=1, client=FakeClient(self.tmp), parents={"Q One": "q"})
+        self.assertEqual(pipeline.load_results()[0]["parent"], "q")
+        self.assertEqual(pipeline.subniche_queue(), [])
+
     def test_manual_translate_links_topic(self):
         pipeline.run(["lost"], ["es", "de"], max_niches=5, client=FakeClient(self.tmp), translate=True)
         self.assertEqual({(r["lang"], r["topic"], r["topic_title"]) for r in pipeline.load_results()},
@@ -276,6 +281,7 @@ class PipelineTest(unittest.TestCase):
         self.assertTrue(all(r["source"] == "auto" and r["category"] for r in results))
         state = pipeline.load_auto_state()
         self.assertEqual(state["runs"], 1)
+        self.assertEqual(len(pipeline.subniche_queue()), len(state["queue"]))
         self.assertTrue(state["seeded"]["en"])
         # следующий запуск не повторяет уже разобранные темы
         before = {r["query"] for r in results}

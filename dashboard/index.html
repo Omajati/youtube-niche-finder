@@ -382,7 +382,8 @@ function updateEstimate() {
 
 function run() {
   return startRun({ mode: "manual", queries: queries(), langs: selectedLangs(), expand: +$("expand").value,
-                    max_niches: +$("max").value, translate: $("translate").checked });
+                    max_niches: +$("max").value, translate: $("translate").checked,
+                    parents: Object.fromEntries(queries().filter(q => pendingParents[q]).map(q => [q, pendingParents[q]])) });
 }
 function runAuto() {
   return startRun({ mode: "auto", langs: selectedLangs(), budget: +$("budget").value });
@@ -545,10 +546,20 @@ async function poll() {
   updateAutoEstimate();
 }
 
+let subQueue = [];
 async function loadResults() {
   results = await (await fetch("/api/results")).json();
+  try { subQueue = await (await fetch("/api/auto/queue")).json(); } catch (e) { subQueue = []; }
   render();
 }
+
+// --- дерево подниш: от какой ниши пошла подниша и что выросло из ниши ---
+const norm = s => (s || "").toLowerCase().trim();
+const parentOf = r => r.parent && norm(r.parent) !== norm(r.query) ? r.parent : "";
+const findNiche = (q, lang) => results.find(x => x.lang === lang && norm(x.query) === norm(q));
+const childrenOf = r => results.filter(x => x.lang === r.lang && norm(parentOf(x)) === norm(r.query));
+const queuedOf = r => subQueue.filter(q => q.lang === r.lang && norm(q.parent) === norm(r.query) && !findNiche(q.query, q.lang));
+let pendingParents = {};   // подниши, добавленные чипами из карточки: запрос → родитель
 
 function val(r, k) {
   if (k.startsWith("m.")) return (r.metrics || {})[k.slice(2)] ?? 0;
@@ -612,7 +623,7 @@ function render() {
     const inVault = vault.items.some(v => v.key === vkey(r));
     const main = `<tr class="item" data-key="${esc(key(r))}">
       <td><span class="score" style="background:${color(r.score)}">${r.score}</span></td>
-      <td class="q">${inVault ? "★ " : ""}${esc(r.query)}${r.depth === "scout" ? '<span class="scout" title="Быстрая оценка по одному поиску. Полный анализ делается для лучших.">разведка</span>' : ""}${r.low_data ? '<span class="badge">мало данных</span>' : ""}${r.category && cfg.auto ? `<div class="hint" style="margin:2px 0 0;font-weight:400">${esc(cfg.auto.category_names[r.category] || "")}</div>` : ""}</td>
+      <td class="q">${inVault ? "★ " : ""}${esc(r.query)}${r.depth === "scout" ? '<span class="scout" title="Быстрая оценка по одному поиску. Полный анализ делается для лучших.">разведка</span>' : ""}${r.low_data ? '<span class="badge">мало данных</span>' : ""}${r.category && cfg.auto || parentOf(r) ? `<div class="hint" style="margin:2px 0 0;font-weight:400">${r.category && cfg.auto ? esc(cfg.auto.category_names[r.category] || "") : ""}${r.category && cfg.auto && parentOf(r) ? " · " : ""}${parentOf(r) ? `от: ${findNiche(parentOf(r), r.lang) ? `<a href="#" data-goto="${esc(r.lang + "|" + findNiche(parentOf(r), r.lang).query)}">${esc(parentOf(r))}</a>` : esc(parentOf(r))}` : ""}${childrenOf(r).length ? ` · подниш: ${childrenOf(r).length}` : ""}</div>` : childrenOf(r).length ? `<div class="hint" style="margin:2px 0 0;font-weight:400">подниш: ${childrenOf(r).length}</div>` : ""}</td>
       <td><span class="lang">${r.lang}</span></td>
       <td><div class="bars">${bars}</div></td>
       <td>${sc(r, "evergreen")}</td>
@@ -746,6 +757,7 @@ function detail(r) {
     </div>
     ${r.depth === "scout" ? '<p class="hint">Это быстрая разведка по одному поиску, без проверки частоты загрузок. Нажмите «Полный анализ», чтобы проверить нишу целиком.</p>' : ""}
     ${crit}
+    ${treeBox(r)}
     ${claudeBox(r, nrep)}
     <h3>Лучшие ролики малых каналов (от ${mv} просмотров)</h3><div class="videos">${videos || `<span class="hint">нет роликов от ${mv}</span>`}</div>
     <h3>Каналы</h3><div class="table-wrap"><table class="ch-table"><thead><tr><th>Канал</th><th>Подписчики</th><th>Лучший ролик</th><th>Видео</th><th title="Длинные ролики в неделю за последние 3 месяца">В неделю</th><th>Создан</th><th title="Разбор конкурента через Claude: топ-10 роликов, обложки, комментарии">Claude</th></tr></thead><tbody>${channels}</tbody></table></div>
@@ -772,8 +784,11 @@ $("rows").addEventListener("click", async e => {
   const chrep = e.target.closest("[data-chrep]");
   if (chrep) return startReport({ kind: "channel", channel_id: chrep.dataset.chrep, title: chrep.dataset.title,
                                    niche: chrep.dataset.niche, model: $("repModel").value });
+  const go = e.target.closest("[data-goto]");
+  if (go) { e.preventDefault(); return openNiche(go.dataset.goto); }
   const tag = e.target.closest("[data-tag]");
   if (tag) {
+    if (openKey) { const p = results.find(x => key(x) === openKey); if (p) pendingParents[tag.dataset.tag] = p.query; }
     const q = $("queries");
     q.value = (q.value.trim() ? q.value.trim() + "\n" : "") + tag.dataset.tag;
     const r = results.find(x => key(x) === openKey);
@@ -850,6 +865,20 @@ async function loadSpend() {
   try { s = await (await fetch("/api/claude/spend")).json(); } catch (e) { return; }
   const usd = v => "$" + v.toFixed(2);
   $("spend").innerHTML = `Claude: <b>${usd(s.total)}</b> всего · ${usd(s.month)} за ${MONTHS[new Date().getMonth()]} · разборов ${s.count}`;
+}
+function treeBox(r) {
+  const kids = childrenOf(r).sort((a, b) => b.score - a.score), queued = queuedOf(r), par = parentOf(r);
+  if (!kids.length && !queued.length && !par) return "";
+  const parentNiche = par && findNiche(par, r.lang);
+  const better = kids.filter(k => (k.depth || "full") === "full" && !k.low_data && k.score > r.score).length;
+  const kid = k => `<button class="chip" data-goto="${esc(key(k))}" title="${k.depth === "scout" ? "разведка" : "полный анализ"}${k.low_data ? ", мало данных" : ""}">
+    <b style="color:${color(k.score)}">${k.score}</b> ${esc(k.query)}${k.depth === "scout" ? " · разведка" : ""}${childrenOf(k).length ? ` · ещё ${childrenOf(k).length}` : ""}</button>`;
+  return `<h3>Дерево подниш</h3>
+    ${par ? `<p class="hint" style="margin:0 0 6px">Подниша ниши ${parentNiche ? `<a href="#" data-goto="${esc(key(parentNiche))}">«${esc(par)}»</a> (балл ${parentNiche.score})` : `«${esc(par)}»`}.
+      ${parentNiche ? (r.score > parentNiche.score ? "Балл выше, чем у родителя: узкий угол работает лучше широкой темы." : "Балл не выше, чем у родителя.") : ""}</p>` : ""}
+    ${kids.length ? `<p class="hint" style="margin:0 0 6px">Проверенные подниши (${kids.length})${better ? `: <b>${better}</b> с баллом выше этой ниши, с них и стоит заходить` : ""}.</p><div class="chips">${kids.map(kid).join("")}</div>` : ""}
+    ${queued.length ? `<p class="hint" style="margin:8px 0 6px">Ждут проверки в следующих запусках автопоиска (${queued.length}):</p>
+      <div class="chips">${queued.map(q => `<button class="chip" data-tag="${esc(q.query)}" title="Добавить в поиск по запросу сейчас">⏳ ${esc(q.query)}</button>`).join("")}</div>` : ""}`;
 }
 function claudeBox(r, rep) {
   const c = cfg.claude || {};
