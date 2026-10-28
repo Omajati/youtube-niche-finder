@@ -226,6 +226,25 @@ class PipelineTest(unittest.TestCase):
         plan = pipeline.plan_queries(client, ["lost"], ["es"], 0, 5, translate=True)
         self.assertEqual(plan, [("perdidos", "es")])
 
+    def test_compare_one_topic_across_languages(self):
+        client = FakeClient(self.tmp)
+        status = pipeline.run_compare("Lost", "en", ["es", "de", "en"], client=client)
+        self.assertEqual((status["state"], status["mode"], status["done"]), ("finished", "compare", 3))
+        rows = {r["lang"]: r for r in pipeline.load_results()}
+        self.assertEqual(set(rows), {"en", "es", "de"})
+        self.assertEqual(rows["es"]["query"], "perdidos")          # тема переведена на язык рынка
+        self.assertEqual({r["topic"] for r in rows.values()}, {"en|lost"})
+        self.assertEqual({r["topic_title"] for r in rows.values()}, {"Lost"})
+        self.assertTrue(all(r["depth"] == "full" and r["source"] == "compare" for r in rows.values()))
+        # пересчёт по новым настройкам группу не теряет
+        pipeline.recheck_cached(cache=Cache(self.tmp / "cache"))
+        self.assertEqual({r["topic"] for r in pipeline.load_results()}, {"en|lost"})
+
+    def test_manual_translate_links_topic(self):
+        pipeline.run(["lost"], ["es", "de"], max_niches=5, client=FakeClient(self.tmp), translate=True)
+        self.assertEqual({(r["lang"], r["topic"], r["topic_title"]) for r in pipeline.load_results()},
+                         {("es", "q|lost", "lost"), ("de", "q|lost", "lost")})
+
     def test_autopilot_scouts_deepens_and_queues(self):
         client = FakeClient(self.tmp)
         status = pipeline.run_auto(["en"], budget=1000, client=client)

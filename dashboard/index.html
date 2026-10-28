@@ -125,6 +125,10 @@ a { color: var(--accent); }
 .tabs button { background: transparent; color: var(--muted); border-radius: 6px 6px 0 0; padding: 8px 12px; font-weight: 600; }
 .tabs button.on { color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
 .pane { display: none; } .pane.on { display: block; }
+.cmp { margin: 0 0 20px; }
+.cmp h3 { margin: 0 0 8px; font-size: 14px; }
+.cmp td.top { font-weight: 700; color: var(--good, #1a7f37); }
+.cmp tr.item td:first-child { white-space: nowrap; }
 .scout { font-size: 11px; color: var(--muted); border: 1px dashed var(--line); border-radius: 4px; padding: 0 5px; margin-left: 6px; font-weight: 500; }
 .best { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-bottom: 16px; }
 .best .card { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; cursor: pointer; background: var(--bg); }
@@ -247,6 +251,7 @@ a { color: var(--accent); }
     <div class="tabs" id="viewTabs">
       <button data-view="all" class="on">Все ниши</button>
       <button data-view="vault">Хранилище</button>
+      <button data-view="compare">Сравнение языков</button>
     </div>
     <div class="pane on" id="view-all">
     <h2 id="bestTitle" style="display:none">Лучшие ниши для канала</h2>
@@ -298,6 +303,13 @@ a { color: var(--accent); }
         <span class="count" id="vaultCount"></span>
       </div>
       <div id="vaultList"></div>
+    </div>
+    <div class="pane" id="view-compare">
+      <p class="hint">Одна тема на разных рынках. Сравнение запускается кнопкой «Сравнить на других языках» в карточке ниши
+        (тема переводится и разбирается полностью на каждом рынке). Сюда же попадают переводы из поиска по запросу с галочкой «перевести».
+        <b>Итог с учётом денег</b> = балл × (0,5 + 0,5 × RPM рынка / лучший RPM в группе): хорошая ниша на дешёвом рынке опускается ниже.
+        Лучшие значения в каждом столбце выделены, строка открывает нишу.</p>
+      <div id="compareList"></div>
     </div>
   </section>
 </main>
@@ -397,11 +409,7 @@ function renderBest() {
 }
 $("best").addEventListener("click", e => {
   const c = e.target.closest("[data-open]");
-  if (!c) return;
-  openKey = c.dataset.open;
-  $("filterLang").value = ""; $("filterDepth").value = ""; $("hideLow").checked = false;
-  render();
-  document.querySelector(`tr.item[data-key="${CSS.escape(openKey)}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  if (c) openNiche(c.dataset.open);
 });
 
 // --- хранилище ---
@@ -473,7 +481,7 @@ async function poll() {
   clearTimeout(polling);
   const s = await (await fetch("/api/status")).json();
   if (s.state === "running") {
-    showStatus(`${s.mode === "auto" ? `Автопоиск, ${s.phase || ""}` : s.mode === "recheck" ? "Пересчёт по новым настройкам" : "Анализ"}: ${s.done}/${s.total || "?"}${s.current ? ` · сейчас <b>${esc(s.current)}</b>` : ""} · потрачено ${s.units || 0} ед.`);
+    showStatus(`${s.mode === "auto" ? `Автопоиск, ${s.phase || ""}` : s.mode === "recheck" ? "Пересчёт по новым настройкам" : s.mode === "compare" ? "Сравнение языков" : "Анализ"}: ${s.done}/${s.total || "?"}${s.current ? ` · сейчас <b>${esc(s.current)}</b>` : ""} · потрачено ${s.units || 0} ед.`);
     await loadResults();
     polling = setTimeout(poll, 1500);
     return;
@@ -483,7 +491,7 @@ async function poll() {
   const errs = (s.errors || []).map(e => "<br>" + esc(e)).join("");
   const label = { finished: "Готово", quota_exhausted: "Квота закончилась на всех ключах", error: "Ошибка" }[s.state] || s.state;
   if (s.mode === "recheck") showStatus(`Пересчитано ${s.done || 0} ниш по новым настройкам: ${s.from_cache || 0} полностью из кэша, ${s.weights_only || 0} только по новым весам (их данных в кэше уже нет). Квота не тратилась.${errs}`, s.state !== "finished");
-  else showStatus(`${label}: проанализировано ${s.done || 0} ниш, потрачено ${s.units || 0} ед.${s.mode === "auto" ? `. В очереди на следующий запуск: ${s.queue ?? 0} подниш` : ""}${errs}`, s.state !== "finished");
+  else showStatus(`${label}: проанализировано ${s.done || 0} ниш, потрачено ${s.units || 0} ед.${s.mode === "auto" ? `. В очереди на следующий запуск: ${s.queue ?? 0} подниш` : ""}${s.mode === "compare" ? ". Таблица во вкладке «Сравнение языков»" : ""}${errs}`, s.state !== "finished");
   await loadVault();
   await loadResults();
   const fresh = await (await fetch("/api/config")).json();
@@ -573,7 +581,80 @@ function render() {
     </tr>`;
     return main + (openKey === key(r) ? detail(r) : "");
   }).join("");
+  renderCompare();
 }
+
+// --- сравнение одной темы на разных языках ---
+function compareGroups() {
+  const groups = {};
+  results.filter(r => r.topic).forEach(r => (groups[r.topic] = groups[r.topic] || []).push(r));
+  return Object.entries(groups).filter(([, rs]) => new Set(rs.map(r => r.lang)).size > 1);
+}
+function compareGroup(r) { return r.topic && compareGroups().some(([t]) => t === r.topic); }
+function compareLangs(r) {
+  // рынки, отмеченные слева; если отмечен только язык самой ниши, берём все остальные
+  const picked = selectedLangs().filter(l => l !== r.lang);
+  return picked.length ? picked : Object.keys(cfg.languages).filter(l => l !== r.lang);
+}
+const moneyScore = (r, maxRpm) => r.income && maxRpm ? Math.round(r.score * (0.5 + 0.5 * r.income.rpm / maxRpm)) : r.score;
+function renderCompare() {
+  const groups = compareGroups();
+  const tab = document.querySelector('#viewTabs [data-view="compare"]');
+  if (tab) tab.textContent = `Сравнение языков${groups.length ? ` (${groups.length})` : ""}`;
+  if (!groups.length) {
+    $("compareList").innerHTML = '<p class="empty">Пока нет сравнений. Откройте нишу и нажмите «Сравнить на других языках».</p>';
+    return;
+  }
+  const cols = [
+    ["Балл", r => r.score, 1],
+    ["Итог с учётом денег", null, 1],
+    ["Вечнозел.", r => sc(r, "evergreen"), 1],
+    ["Просм./подп.", r => r.metrics.median_ratio_small, 1, v => v != null ? v + "×" : "–"],
+    ["Новые успешные", r => r.metrics.new_successful ?? 0, 1, (v, r) => `${v} / ${r.metrics.new_channels ?? 0}`],
+    ["Миллионники", r => r.metrics.big_share ?? 0, -1, v => v + "%"],
+    ["Роликов по теме", r => r.metrics.search_total, -1, v => v ? fmt(v) : "–"],
+    ["До 1000 подп.", r => r.metrics.months_to_1k, -1, v => v != null ? `≈ ${v} мес.` : "–"],
+    ["RPM", r => r.income && r.income.rpm, 1, (v, r) => r.income ? `$${r.income.rpm_low}–${r.income.rpm_high}` : "–"],
+    ["Доход при 1M", r => r.income && r.income.per_views["1000000"][1], 1, (v, r) => r.income ? `$${r.income.per_views["1000000"].join("–")}` : "–"],
+  ];
+  $("compareList").innerHTML = groups.map(([topic, rs]) => {
+    const maxRpm = Math.max(0, ...rs.map(r => (r.income && r.income.rpm) || 0));
+    const getters = cols.map(c => c[1] || (r => moneyScore(r, maxRpm)));
+    rs = rs.slice().sort((a, b) => moneyScore(b, maxRpm) - moneyScore(a, maxRpm));
+    const best = getters.map((g, i) => {
+      const vals = rs.map(g).filter(v => v != null && !isNaN(v));
+      // выделяем лучшее, только если рынки различаются
+      return new Set(vals).size > 1 ? (cols[i][2] > 0 ? Math.max(...vals) : Math.min(...vals)) : null;
+    });
+    const title = rs.find(r => r.topic_title)?.topic_title || rs[0].query;
+    const rows = rs.map(r => `<tr class="item" data-cmp-key="${esc(key(r))}">
+      <td><span class="lang">${r.lang}</span> ${esc(cfg.languages[r.lang] || "")}</td>
+      <td class="q">${esc(r.query)}${r.depth === "scout" ? '<span class="scout">разведка</span>' : ""}${r.low_data ? '<span class="badge">мало данных</span>' : ""}</td>
+      ${getters.map((g, i) => {
+        const v = g(r), shown = i === 0 || i === 1 ? `<span class="score" style="background:${color(v)}">${v}</span>` : (cols[i][3] ? cols[i][3](v, r) : (v ?? "–"));
+        return `<td class="${best[i] != null && v === best[i] ? "top" : ""}">${shown}</td>`;
+      }).join("")}</tr>`).join("");
+    return `<div class="cmp"><h3>${esc(title)}</h3><div class="table-wrap"><table>
+      <thead><tr><th>Рынок</th><th>Запрос</th>${cols.map(c => `<th>${c[0]}</th>`).join("")}</tr></thead>
+      <tbody>${rows}</tbody></table></div></div>`;
+  }).join("");
+}
+function showCompare(topic) {
+  document.querySelector('#viewTabs [data-view="compare"]').click();
+  const i = compareGroups().findIndex(([t]) => t === topic);
+  $("compareList").children[i]?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+function openNiche(k) {
+  openKey = k;
+  $("filterLang").value = ""; $("filterDepth").value = ""; $("hideLow").checked = false;
+  document.querySelector('#viewTabs [data-view="all"]').click();
+  render();
+  document.querySelector(`tr.item[data-key="${CSS.escape(openKey)}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+$("compareList").addEventListener("click", e => {
+  const row = e.target.closest("[data-cmp-key]");
+  if (row) openNiche(row.dataset.cmpKey);
+});
 
 function detail(r) {
   const m = r.metrics || {};
@@ -623,6 +704,8 @@ function detail(r) {
     <div class="actions">
       ${inVault ? '<button class="ghost" disabled>★ В хранилище</button>' : `<button data-vadd="${esc(key(r))}">★ В хранилище</button>`}
       ${r.depth === "scout" ? `<button class="ghost" data-deep="${esc(key(r))}">Полный анализ</button>` : ""}
+      ${compareGroup(r) ? `<button class="ghost" data-open-cmp="${esc(r.topic)}">Открыть сравнение языков</button>` : ""}
+      <button class="ghost" data-compare="${esc(key(r))}" title="Перевести тему и полностью разобрать её на других рынках">Сравнить на других языках (≈ ${(compareLangs(r).length * cfg.units_per_niche).toLocaleString("ru")} ед.)</button>
       <button class="ghost" data-del="${esc(key(r))}">Удалить из списка</button>
       <span class="hint">Проанализировано ${r.analyzed_at.slice(0, 16).replace("T", " ")}</span></div>
   </td></tr>`;
@@ -661,6 +744,15 @@ $("rows").addEventListener("click", async e => {
     const r = results.find(x => key(x) === deep.dataset.deep);
     return startRun({ mode: "manual", queries: [r.query], langs: [r.lang], expand: 0, max_niches: 1, translate: false });
   }
+  const cmp = e.target.closest("[data-compare]");
+  if (cmp) {
+    const r = results.find(x => key(x) === cmp.dataset.compare), langs = compareLangs(r);
+    const names = langs.map(l => cfg.languages[l]).join(", ");
+    if (!confirm(`Перевести «${r.query}» и разобрать на рынках: ${names}?\nЭто ≈ ${(langs.length * cfg.units_per_niche).toLocaleString("ru")} единиц квоты. Другие рынки можно выбрать галочками языков слева.`)) return;
+    return startRun({ mode: "compare", query: r.query, lang: r.lang, langs });
+  }
+  const ocmp = e.target.closest("[data-open-cmp]");
+  if (ocmp) return showCompare(ocmp.dataset.openCmp);
   const del = e.target.closest("[data-del]");
   if (del) {
     const r = results.find(x => key(x) === del.dataset.del);

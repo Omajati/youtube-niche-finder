@@ -179,14 +179,18 @@ def analyze_niche(client, query, lang, deep=True, meta=None, suggestions=None):
 
 # --- поиск по запросу ---
 
-def plan_queries(client, queries, langs, expand, max_niches, translate=False):
+def plan_queries(client, queries, langs, expand, max_niches, translate=False, topics=None):
     """Список (запрос, язык). expand > 0 добавляет N подсказок YouTube к каждому запросу.
-    translate=True переводит каждую тему на язык рынка."""
+    translate=True переводит каждую тему на язык рынка. В topics (если передан словарь)
+    попадает исходная тема каждого перевода, чтобы потом сравнить её на разных языках."""
     plan = []
     for lang in langs:
         base = queries or DEFAULT_SEEDS.get(lang, [])
         if queries and translate:
             base = [client.translate(q, lang) for q in queries]
+            if topics is not None:
+                for orig, q in zip(queries, base):
+                    topics[(q, lang)] = orig
         for q in base:
             items = [q]
             if expand:
@@ -240,12 +244,44 @@ def run(queries, langs, expand=0, max_niches=10, progress=None, client=None, tra
     client = client or YouTubeClient()
     report = progress or (lambda s: None)
     status = _new_status()
-    plan = plan_queries(client, queries, langs, expand, max_niches, translate)
+    topics = {}
+    plan = plan_queries(client, queries, langs, expand, max_niches, translate, topics)
     status["total"] = len(plan)
     status["plan"] = [f"{q} [{lang}]" for q, lang in plan]
     report(status)
     for query, lang in plan:
-        if _analyze_step(client, status, report, query, lang, True, {"source": "manual"}) is False:
+        meta = {"source": "manual"}
+        if (query, lang) in topics and len(langs) > 1:   # переводы одной темы попадают в сравнение языков
+            orig = topics[(query, lang)]
+            meta.update(topic=f"q|{orig.lower().strip()}", topic_title=orig)
+        if _analyze_step(client, status, report, query, lang, True, meta) is False:
+            break
+    return _finish(status, client, report)
+
+
+# --- сравнение одной ниши на разных языках ---
+
+def run_compare(query, lang, langs=None, progress=None, client=None):
+    """Переводит тему на другие рынки и делает полный анализ на каждом, чтобы сравнить баллы.
+    Все ниши группы получают общий topic, по нему дашборд строит таблицу сравнения."""
+    client = client or YouTubeClient()
+    report = progress or (lambda s: None)
+    status = _new_status()
+    status["mode"] = "compare"
+    langs = [l for l in (langs or config.LANGUAGES) if l in config.LANGUAGES and l != lang]
+    results = {_key(r["query"], r["lang"]): r for r in load_results()}
+    source = results.get(_key(query, lang), {})
+    topic = source.get("topic") or _key(query, lang)
+    title = source.get("topic_title") or query
+    plan = [(query, lang)] + [(client.translate(query, l), l) for l in langs]
+    status["total"] = len(plan)
+    status["plan"] = [f"{q} [{l}]" for q, l in plan]
+    report(status)
+    for q, l in plan:   # повторное сравнение берёт данные из кэша, квота почти не тратится
+        old = results.get(_key(q, l), {})
+        meta = {"source": old.get("source", "compare"), "category": source.get("category", old.get("category", "")),
+                "parent": old.get("parent", ""), "topic": topic, "topic_title": title}
+        if _analyze_step(client, status, report, q, l, True, meta) is False:
             break
     return _finish(status, client, report)
 
@@ -377,7 +413,7 @@ def auto_summary():
 
 # --- пересчёт по новым настройкам ---
 
-META_FIELDS = ("source", "category", "parent")
+META_FIELDS = ("source", "category", "parent", "topic", "topic_title")
 
 
 def recheck_cached(progress=None, cache=None):

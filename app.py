@@ -29,6 +29,7 @@ def start_run(body):
     translate = bool(body.get("translate"))
     auto = body.get("mode") == "auto"
     recheck = body.get("mode") == "recheck"
+    compare = body.get("mode") == "compare"
     budget = max(500, min(int(body.get("budget", 3000)), 40_000))
 
     def progress(status):
@@ -39,6 +40,9 @@ def start_run(body):
         try:
             if recheck:
                 pipeline.recheck_cached(progress=progress)
+            elif compare:
+                pipeline.run_compare(body["query"].strip(), body["lang"], body.get("langs") or None,
+                                     progress=progress)
             elif auto:
                 pipeline.run_auto(langs, budget, progress=progress)
             else:
@@ -132,7 +136,10 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             return self._json({"error": "bad json"}, 400)
         if self.path == "/api/run":
-            if start_run(body):
+            if body.get("mode") == "compare" and not (str(body.get("query", "")).strip()
+                                                     and body.get("lang") in config.LANGUAGES):
+                self._json({"error": "Нужны тема и язык"}, 400)
+            elif start_run(body):
                 self._json({"ok": True})
             else:
                 self._json({"error": "Анализ уже идёт"}, 409)
