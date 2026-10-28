@@ -12,6 +12,7 @@ AUTO_FILE = DATA_DIR / "autopilot.json"   # очередь подниш и пр�
 # Ключи, вписанные в настройках приложения, хранятся в data/.env: обновление папку data не трогает.
 KEYS_FILE = DATA_DIR / ".env"
 SETTINGS_FILE = DATA_DIR / "settings.json"
+TOPICS_FILE = DATA_DIR / "topics_claude.json"   # направления для автопоиска, которые предложил Claude
 SPEND_FILE = DATA_DIR / "claude_spend.json"   # сколько потрачено на Claude: всего и по месяцам
 REPORTS_FILE = DATA_DIR / "reports.json"    # разборы ниш и конкурентов через Claude  # настройки анализа из окна «Настройки анализа»
 
@@ -108,6 +109,11 @@ VAULT_MIN_SCORE = _int("VAULT_MIN_SCORE", 65)             # с таким бал
 # В России монетизация YouTube для местных каналов отключена с 2022 года: RPM русскоязычной аудитории низкий,
 # доход обычно идёт с интеграций и донатов (Boosty и т.п.)
 RPM = {"en": 6.0, "de": 5.0, "fr": 4.0, "es": 2.5, "ru": 0.7}
+# Свои темы для автопоиска: по одной на строку, на любом языке (на другие рынки переводятся)
+CUSTOM_TOPICS = []
+# Эти настройки не влияют на оценку: при их изменении ниши не пересчитываются
+NO_RECHECK = {"custom_topics", "claude_model"}
+
 # Размер рынка: цели в штуках («3 новых успешных канала», «5 сильных малых каналов») умножаются на него.
 # На немецком или французском YouTube каналов в любой теме меньше, чем на английском, и без поправки
 # небольшой рынок проигрывал бы просто из-за размера
@@ -175,6 +181,8 @@ SETTINGS_SPEC = [
     ("saturation_low", "Цели оценки", "Тема узкая, если роликов на YouTube до", "int", 10, 10_000_000, ""),
     ("saturation_high", "Цели оценки", "Тема массовая, если роликов от", "int", 100, 100_000_000, ""),
     ("low_data_min_hits", "Цели оценки", "«Мало данных», если успешных роликов меньше", "int", 1, 50, ""),
+    ("custom_topics", "Автопоиск", "Свои темы, по одной на строку", "lines", None, None,
+     "Автопоиск возьмёт их раньше категорий каталога. Можно писать по-русски: на язык рынка тема переведётся сама"),
     ("market_en", "Размер рынка", "Размер рынка EN", "float", 0.1, 3,
      "Цели «новые каналы» и «сильные малые каналы» умножаются на это число. EN = 1"),
     ("market_es", "Размер рынка", "Размер рынка ES", "float", 0.1, 3, ""),
@@ -230,6 +238,8 @@ def _get_setting(key):
         return ",".join(SEARCH_DURATIONS)
     if key == "exclude_countries":
         return ",".join(sorted(EXCLUDE_COUNTRIES))
+    if key == "custom_topics":
+        return "\n".join(CUSTOM_TOPICS)
     return g[_ATTRS[key]]
 
 
@@ -247,6 +257,8 @@ def _set_setting(key, value):
         WEIGHTS[key[len("weight_"):]] = value
     elif key == "search_durations":
         SEARCH_DURATIONS[:] = value.split(",")
+    elif key == "custom_topics":
+        CUSTOM_TOPICS[:] = [t for t in value.split("\n") if t]
     elif key == "exclude_countries":
         EXCLUDE_COUNTRIES.clear()
         EXCLUDE_COUNTRIES.update(value.split(",") if value else [])
@@ -261,6 +273,14 @@ def _clean(spec, value):
         if value not in CHOICES[key]:
             raise ValueError(key)
         return value
+    if kind == "lines":   # одна строка = одна тема, без пустых и повторов
+        seen, out = set(), []
+        for t in str(value).splitlines():
+            t = " ".join(t.split())[:100]
+            if t and t.lower() not in seen:
+                seen.add(t.lower())
+                out.append(t)
+        return "\n".join(out[:300])
     if kind == "text":
         return ",".join(c.strip().upper() for c in str(value).split(",") if c.strip())
     value = float(value) if kind == "float" else int(float(value))

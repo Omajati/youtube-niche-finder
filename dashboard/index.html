@@ -222,8 +222,10 @@ a { color: var(--accent); }
       <label for="budget">Бюджет квоты на запуск, единиц</label>
       <input type="number" id="budget" min="500" max="40000" step="500" value="3000">
       <div class="hint" id="autoEstimate"></div>
-      <div class="actions"><button id="runAuto">Запустить автопоиск</button></div>
+      <div class="actions"><button id="runAuto">Запустить автопоиск</button>
+        <button class="ghost" id="claudeTopics" title="Claude смотрит каталог и лучшие ниши и предлагает 30 новых направлений на всех языках">Новые темы через Claude (≈ $0,1)</button></div>
       <div class="hint" id="autoInfo"></div>
+      <div class="hint">Свои темы для автопоиска можно вписать в «Настройки анализа» → «Автопоиск». Почти одинаковые запросы («… facts», «… documentary») автопоиск пропускает.</div>
     </div>
     <div class="pane" id="pane-manual">
     <label for="queries">Темы (по одной в строке)</label>
@@ -402,9 +404,10 @@ function updateAutoEstimate() {
   const a = cfg.auto, b = +$("budget").value || 3000;
   const scout = Math.floor(b * 0.6 / a.units_scout), deep = Math.floor((b - scout * a.units_scout) / a.units_deep);
   $("autoEstimate").textContent = `≈ ${scout} тем на разведку и ${deep} на полный анализ. У одного ключа 10 000 единиц в день.`;
+  const cats = `Категорий: ${a.categories} (каталог ${a.categories_base ?? a.categories}${a.categories_custom ? `, свои ${a.categories_custom}` : ""}${a.categories_claude ? `, от Claude ${a.categories_claude}` : ""})`;
   $("autoInfo").textContent = a.runs
-    ? `Запусков: ${a.runs}. Проверено тем: ${a.explored}. В очереди подниш: ${a.queue}. Категорий в каталоге: ${a.categories}.`
-    : `Категорий в каталоге: ${a.categories}: загадки, древние цивилизации, космос, психология, изобретения, катастрофы и другие.`;
+    ? `Запусков: ${a.runs}. Проверено тем: ${a.explored}. В очереди подниш: ${a.queue}. ${cats}.`
+    : `${cats}: загадки, древние цивилизации, космос, медицина, архитектура, шпионаж, финансы и другие.`;
 }
 
 const catName = r => (r.category && cfg.auto && cfg.auto.category_names[r.category]) || "";
@@ -838,6 +841,10 @@ document.querySelectorAll("th[data-sort]").forEach(th => th.addEventListener("cl
 $("filterLang").addEventListener("change", render);
 $("filterDepth").addEventListener("change", render);
 $("runAuto").addEventListener("click", runAuto);
+$("claudeTopics").addEventListener("click", () => {
+  if (!confirm("Claude посмотрит каталог и лучшие найденные ниши и предложит 30 новых направлений на всех языках. Это стоит примерно $0,1. Запустить?")) return;
+  startReport({ kind: "topics" });
+});
 $("budget").addEventListener("input", updateAutoEstimate);
 $("hideLow").addEventListener("change", render);
 $("filtersBtn").addEventListener("click", () => $("filters").classList.toggle("open"));
@@ -903,7 +910,8 @@ async function pollReport(initial) {
   try { s = await (await fetch("/api/report/status")).json(); } catch (e) { return; }
   if (s.state === "running") {
     const sec = Math.round((Date.now() - Date.parse(s.started_at)) / 1000);
-    showStatus(`Claude разбирает ${s.kind === "niche" ? "нишу" : "канал"} <b>${esc(s.title)}</b>… ${sec} с. Обычно это 1–4 минуты.`);
+    showStatus(s.kind === "topics" ? `Claude подбирает новые темы для автопоиска… ${sec} с. Обычно это 1–3 минуты.`
+      : `Claude разбирает ${s.kind === "niche" ? "нишу" : "канал"} <b>${esc(s.title)}</b>… ${sec} с. Обычно это 1–4 минуты.`);
     repPolling = setTimeout(() => pollReport(), 2000);
     return;
   }
@@ -911,6 +919,13 @@ async function pollReport(initial) {
   if (s.state === "error") { loadSpend(); return showStatus(esc(s.error), true); }
   if (s.state === "finished" && s.key !== lastShownReport) {
     lastShownReport = s.key;
+    if (s.kind === "topics") {
+      lastShownReport = null;   // следующий подбор тем тоже должен показаться
+      loadSpend();
+      const fresh = await (await fetch("/api/config")).json();
+      cfg.auto = fresh.auto; updateAutoEstimate();
+      return showStatus(`Claude добавил ${s.added} новых тем в каталог автопоиска (≈ $${s.cost_usd}): ${(s.names || []).map(esc).join(", ")}. Следующий запуск автопоиска возьмёт их первыми.`);
+    }
     showStatus(`Разбор готов, стоил ≈ $${s.cost_usd}.`);
     await loadReports(); render();
     openReport(s.key);
@@ -962,7 +977,7 @@ async function openAnSettings() {
   $("anForm").innerHTML = groups.map(([g, fields]) => `<div class="set-group"><h3>${esc(g)}</h3>
     ${g === "Веса критериев" ? '<div class="hint">Важность критерия в итоговом балле. Сумма может быть любой, в процентах она пересчитается сама. 0 выключает критерий.</div>' : ""}
     <div class="set-grid">${fields.map(field).join("")}</div></div>`).join("");
-  $("anForm").querySelectorAll("input, select").forEach(i => i.addEventListener("input", markChanged));
+  $("anForm").querySelectorAll("input, select, textarea").forEach(i => i.addEventListener("input", markChanged));
   markChanged();
   $("anMsg").textContent = "";
   $("anSettings").classList.add("open");
@@ -974,10 +989,12 @@ function field(f) {
     input = `<select data-k="${f.key}">${Object.entries(anSpec.choices[f.key]).map(([k, n]) => `<option value="${k}" ${k === v ? "selected" : ""}>${esc(n)}</option>`).join("")}</select>`;
   } else if (f.kind === "text") {
     input = `<input type="text" data-k="${f.key}" value="${esc(v)}">`;
+  } else if (f.kind === "lines") {
+    input = `<textarea data-k="${f.key}" rows="5" placeholder="история шахмат&#10;знаменитые маяки&#10;how bridges are built">${esc(v)}</textarea>`;
   } else {
-    input = `<input type="number" data-k="${f.key}" value="${v}" min="${f.min}" max="${f.max}" step="${f.kind === "float" ? "0.5" : "1"}">`;
+    input = `<input type="number" data-k="${f.key}" value="${v}" min="${f.min}" max="${f.max}" step="${f.kind === "float" ? "0.1" : "1"}">`;
   }
-  const def = f.kind === "choice" ? anSpec.choices[f.key][d] : fmtNum(d);
+  const def = f.kind === "choice" ? anSpec.choices[f.key][d] : f.kind === "lines" ? (d ? d.split("\n").length + " тем" : "нет") : fmtNum(d);
   return `<div data-f="${f.key}"><label>${esc(f.label)}</label>${input}
     <div class="hint">${f.hint ? esc(f.hint) + ". " : ""}По умолчанию: ${esc(def)}<span class="pct"></span></div></div>`;
 }
@@ -985,7 +1002,7 @@ function readAnForm() {
   const out = {};
   $("anForm").querySelectorAll("[data-k]").forEach(i => {
     const f = anSpec.spec.find(x => x.key === i.dataset.k);
-    out[f.key] = f.kind === "choice" || f.kind === "text" ? i.value : Number(i.value);
+    out[f.key] = f.kind === "choice" || f.kind === "text" || f.kind === "lines" ? i.value : Number(i.value);
   });
   return out;
 }
