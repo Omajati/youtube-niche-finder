@@ -79,11 +79,24 @@ def _non_latin(text):
     return any(ch.isalpha() and not unicodedata.name(ch, "").startswith("LATIN") for ch in text)
 
 
+UKRAINIAN_LETTERS = set("іїєґІЇЄҐ")
+
+
+def _russian_ok(text):
+    """Русский ролик: в названии есть кириллица, нет украинских букв и других алфавитов, кроме латиницы."""
+    letters = [ch for ch in text if ch.isalpha()]
+    has_cyr = any(unicodedata.name(ch, "").startswith("CYRILLIC") for ch in letters)
+    other = any(not unicodedata.name(ch, "").startswith(("CYRILLIC", "LATIN")) for ch in letters)
+    return has_cyr and not other and not UKRAINIAN_LETTERS.intersection(text)
+
+
 def _video_lang_ok(snippet, lang, channel_title=""):
     declared = snippet.get("defaultAudioLanguage") or snippet.get("defaultLanguage")
     if declared:
         return declared.lower().startswith(lang)
     # язык не указан: отсекаем по письменности и явным пометкам вроде «Hindi Documentary»
+    if lang == "ru":
+        return _russian_ok(snippet.get("title", "")) and not FOREIGN_WORDS.search(snippet.get("title", ""))
     text = snippet.get("title", "") + " " + channel_title
     return not _non_latin(text) and not FOREIGN_WORDS.search(text)
 

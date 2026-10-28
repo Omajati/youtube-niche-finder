@@ -10,7 +10,7 @@ from . import config
 from .scoring import parse_duration
 from .youtube import YouTubeClient
 
-LANG_NAMES = {"en": "английский", "es": "испанский", "de": "немецкий", "fr": "французский"}
+LANG_NAMES = {"en": "английский", "es": "испанский", "de": "немецкий", "fr": "французский", "ru": "русский"}
 
 status = {"state": "idle"}
 _lock = threading.Lock()

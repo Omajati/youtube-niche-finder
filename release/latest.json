@@ -1,5 +1,5 @@
 {
- "version": 8,
- "notes": "Разборы ниш и конкурентов через Claude, рост, запас идей, RPM и доход",
+ "version": 9,
+ "notes": "Русский рынок: автопоиск, поиск по запросу, пороги и разборы",
  "app_zip": "https://raw.githubusercontent.com/Omajati/youtube-niche-finder/main/release/NicheFinder.zip"
 }
