@@ -93,6 +93,8 @@ def vault_add(result, auto=False):
             "query": result["query"],
             "lang": result["lang"],
             "category": result.get("category", ""),
+            "topic": result.get("topic", ""),             # общая тема переводов: связывает языки
+            "topic_title": result.get("topic_title", ""),
             "score": result.get("score", 0),
             "scores": result.get("scores", {}),
             "metrics": result.get("metrics", {}),
@@ -454,6 +456,7 @@ def recheck_cached(progress=None, cache=None):
         for v in vault:
             r = fresh.get(v["key"])
             if r:
-                v.update(score=r["score"], scores=r.get("scores", {}), metrics=r.get("metrics", {}))
+                v.update(score=r["score"], scores=r.get("scores", {}), metrics=r.get("metrics", {}),
+                         topic=r.get("topic", ""), topic_title=r.get("topic_title", ""))
         _write(config.VAULT_FILE, vault)
     return _finish(status, client, report)
